@@ -5,5 +5,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface AlternativeRepository extends JpaRepository<Alternative, Long> {
-    List<Alternative> findByKindIgnoreCase(String kind);
+    List<Alternative> findByTripIdAndItemId(Long tripId, Long itemId);
 }

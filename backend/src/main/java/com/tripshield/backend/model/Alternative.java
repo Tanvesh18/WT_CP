@@ -2,6 +2,7 @@ package com.tripshield.backend.model;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 public class Alternative {
@@ -13,10 +14,16 @@ public class Alternative {
     public int delayMinutes;
     public BigDecimal estimatedCost;
     public String description;
+    public Long tripId;
+    public Long itemId;
+    public LocalDateTime startsAt;
+    public LocalDateTime endsAt;
 
     public Alternative() {}
-    public Alternative(String kind, String title, String location, int delayMinutes, String cost, String description) {
-        this.kind = kind; this.title = title; this.location = location;
-        this.delayMinutes = delayMinutes; this.estimatedCost = new BigDecimal(cost); this.description = description;
+    public Alternative(Long tripId, Long itemId, String kind, String title, String location,
+                       LocalDateTime startsAt, LocalDateTime endsAt, String cost, String description) {
+        this.tripId = tripId; this.itemId = itemId; this.kind = kind; this.title = title;
+        this.location = location; this.startsAt = startsAt; this.endsAt = endsAt;
+        this.estimatedCost = new BigDecimal(cost); this.description = description;
     }
 }

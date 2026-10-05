@@ -1,14 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import RouteMap from './RouteMap'
 import './App.css'
 
 type Kind = 'FLIGHT' | 'HOTEL' | 'TRANSPORT'
 type Item = { id: number; kind: Kind; title: string; location: string; startsAt: string; endsAt: string; status: string; changeNote: string | null }
-type Trip = { id: number; traveler: string; origin: string; destination: string; startDate: string; endDate: string; status: string; items: Item[] }
-type Alternative = { id: number; kind: Kind; title: string; location: string; delayMinutes: number; estimatedCost: number; description: string }
+type Trip = { id: number; traveler: string; origin: string; destination: string; startDate: string; endDate: string; status: string; riskLevel: string; riskReason: string; checkInStatus: string; checkedInAt: string | null; checkInNote: string | null; items: Item[] }
+type Alternative = { id: number; kind: Kind; title: string; location: string; startsAt: string; endsAt: string; delayMinutes: number; estimatedCost: number; description: string }
 type Impact = { message: string; affectedItem: Item; alternatives: Alternative[] }
+type TripEvent = { id: number; type: string; details: string; occurredAt: string }
 type ItemDraft = { kind: Kind; title: string; location: string; startsAt: string; endsAt: string }
+
 const blank = (): ItemDraft => ({ kind: 'FLIGHT', title: '', location: '', startsAt: '', endsAt: '' })
 const disruption: Record<Kind, string> = { FLIGHT: 'FLIGHT_CANCELLATION', HOTEL: 'HOTEL_UNAVAILABLE', TRANSPORT: 'TRANSPORT_DISRUPTION' }
+const time = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
@@ -22,6 +26,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 function App() {
   const [trips, setTrips] = useState<Trip[]>([])
   const [selectedId, select] = useState<number | null>(null)
+  const [history, setHistory] = useState<TripEvent[]>([])
+  const [tab, setTab] = useState<'timeline' | 'map'>('timeline')
   const [creating, setCreating] = useState(false)
   const [traveler, setTraveler] = useState('')
   const [origin, setOrigin] = useState('')
@@ -29,36 +35,47 @@ function App() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [items, setItems] = useState<ItemDraft[]>([blank()])
+  const [checkInNote, setCheckInNote] = useState('')
   const [impact, setImpact] = useState<Impact | null>(null)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const selected = trips.find(t => t.id === selectedId)
-  const attention = trips.filter(t => t.status === 'NEEDS_ATTENTION').length
+  const selected = trips.find(trip => trip.id === selectedId)
+  const attention = trips.filter(trip => trip.status === 'NEEDS_ATTENTION').length
 
-  async function refresh(pick?: number) {
-    const data = await api<Trip[]>('/trips')
-    setTrips(data)
-    if (pick !== undefined) select(pick)
-    else select(current => current ?? data[0]?.id ?? null)
-  }
   useEffect(() => {
     api<Trip[]>('/trips').then(data => {
       setTrips(data)
       select(data[0]?.id ?? null)
-    }).catch(e => setError(e.message))
+    }).catch(err => setError(err.message))
   }, [])
+  useEffect(() => {
+    if (selectedId === null) return
+    api<TripEvent[]>(`/trips/${selectedId}/history`).then(setHistory).catch(err => setError(err.message))
+  }, [selectedId])
+
+  async function refresh(id?: number) {
+    const data = await api<Trip[]>('/trips')
+    setTrips(data)
+    if (id !== undefined) {
+      select(id)
+      setHistory(await api<TripEvent[]>(`/trips/${id}/history`))
+    }
+  }
   async function run(action: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('')
-    try { await action() } catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong') }
+    try { await action() } catch (err) { setError(err instanceof Error ? err.message : 'Something went wrong') }
     finally { setBusy(false) }
   }
-  function update(index: number, value: Partial<ItemDraft>) { setItems(current => current.map((item, i) => i === index ? { ...item, ...value } : item)) }
-  function create(e: FormEvent) {
-    e.preventDefault()
+  function update(index: number, value: Partial<ItemDraft>) {
+    setItems(current => current.map((item, i) => i === index ? { ...item, ...value } : item))
+  }
+  function create(event: FormEvent) {
+    event.preventDefault()
     run(async () => {
       const trip = await api<Trip>('/trips', { method: 'POST', body: JSON.stringify({ traveler, origin, destination, startDate, endDate, items }) })
-      await refresh(trip.id); setCreating(false); setItems([blank()]); setTraveler(''); setOrigin(''); setDestination(''); setStartDate(''); setEndDate('')
+      await refresh(trip.id)
+      setCreating(false); setItems([blank()]); setTraveler(''); setOrigin(''); setDestination(''); setStartDate(''); setEndDate('')
       setNotice('Trip created successfully.')
     })
   }
@@ -77,20 +94,39 @@ function App() {
     run(async () => {
       await api<Trip>(`/trips/${selected.id}/items/${impact.affectedItem.id}/alternatives/${option.id}/apply`, { method: 'POST' })
       await refresh(selected.id); setImpact(null)
-      setNotice(`Itinerary updated: ${option.title} replaces ${impact.affectedItem.title}.`)
+      setNotice(`${option.title} replaced ${impact.affectedItem.title}.`)
     })
   }
+  function checkIn(status: 'SAFE' | 'NEEDS_HELP') {
+    if (!selected) return
+    run(async () => {
+      await api<Trip>(`/trips/${selected.id}/check-in`, { method: 'POST', body: JSON.stringify({ status, note: checkInNote }) })
+      await refresh(selected.id); setCheckInNote('')
+      setNotice(status === 'SAFE' ? 'Traveler marked safe.' : 'Help request recorded for the coordinator.')
+    })
+  }
+
   return <div className="app">
     <header><div className="brand"><span>✦</span> TripShield</div><small>Corporate travel operations</small></header>
     <main>
       <div className="heading"><div><label className="eyebrow">TRAVEL CONTROL CENTER</label><h1>Stay ahead of every trip.</h1><p>Plan travel, spot disruptions, and keep everyone moving.</p></div><button className="primary" onClick={() => setCreating(true)}>+ New trip</button></div>
       {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
       <section className="stats"><div><small>Total trips</small><strong>{trips.length}</strong></div><div><small>Need attention</small><strong className="warn">{attention}</strong></div><div><small>On track</small><strong>{trips.length - attention}</strong></div></section>
-      <div className="workspace"><aside className="panel"><h2>Trips <small>{trips.length}</small></h2>{trips.length === 0 && <p className="muted">Create your first trip to get started.</p>}{trips.map(t => <button className={`trip ${selectedId === t.id ? 'selected' : ''}`} key={t.id} onClick={() => { select(t.id); setImpact(null) }}><b>{t.origin} → {t.destination}</b><small>{t.traveler} · {t.startDate}</small><span className={`badge ${t.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{t.status === 'NEEDS_ATTENTION' ? 'Needs attention' : 'On track'}</span></button>)}</aside>
-      <section className="panel detail">{!selected ? <div className="empty"><span>✈</span><h2>Your trips will appear here</h2><p>Create a trip with a flight, hotel, or transport booking to try disruption recovery.</p></div> : <><div className="detail-head"><div><label className="eyebrow">TRIP #{selected.id}</label><h2>{selected.origin} → {selected.destination}</h2><p>{selected.traveler} · {selected.startDate} to {selected.endDate}</p></div><span className={`badge ${selected.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{selected.status === 'NEEDS_ATTENTION' ? 'Needs attention' : 'On track'}</span></div><h3 className="timeline-title">Itinerary timeline</h3><div className="timeline">{selected.items.map(item => <article className={`event ${item.status.toLowerCase()}`} key={item.id}><div className="event-body"><div className="event-top"><label className="eyebrow">{item.kind}</label><small>{new Date(item.startsAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</small></div><h4>{item.title}</h4><p>{item.location}</p>{item.changeNote && <p className="change">{item.changeNote}</p>}{item.status === 'CONFIRMED' && <><button disabled={busy} onClick={() => simulate(item)}>Simulate {item.kind === 'FLIGHT' ? 'cancellation' : item.kind === 'HOTEL' ? 'hotel unavailability' : 'transport issue'}</button><button disabled={busy} onClick={() => simulate(item, 'SEVERE_WEATHER')}>Simulate severe weather</button></>}{item.status === 'AFFECTED' && <button disabled={busy} onClick={() => options(item)}>Review alternatives →</button>}{item.status === 'REPLACED' && <small>Replaced</small>}</div></article>)}</div></>}</section></div>
+      <div className="workspace">
+        <aside className="panel"><h2>Trips <small>{trips.length}</small></h2>{trips.length === 0 && <p className="muted">Create your first trip to get started.</p>}{trips.map(trip => <button className={`trip ${selectedId === trip.id ? 'selected' : ''}`} key={trip.id} onClick={() => { select(trip.id); setImpact(null); setTab('timeline') }}><b>{trip.origin} → {trip.destination}</b><small>{trip.traveler} · {trip.startDate}</small><span className={`badge ${trip.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{trip.status === 'NEEDS_ATTENTION' ? 'Needs attention' : 'On track'}</span><span className={`risk ${trip.riskLevel.toLowerCase()}`}>{trip.riskLevel} risk</span></button>)}</aside>
+        <section className="panel detail">{!selected ? <div className="empty"><span>✈</span><h2>Your trips will appear here</h2><p>Create a trip to try disruption recovery.</p></div> : <>
+          <div className="detail-head"><div><label className="eyebrow">TRIP #{selected.id}</label><h2>{selected.origin} → {selected.destination}</h2><p>{selected.traveler} · {selected.startDate} to {selected.endDate}</p></div><span className={`badge ${selected.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{selected.status === 'NEEDS_ATTENTION' ? 'Needs attention' : 'On track'}</span></div>
+          <div className="risk-card"><strong className={`risk ${selected.riskLevel.toLowerCase()}`}>{selected.riskLevel} risk</strong><span>{selected.riskReason}</span></div>
+          <div className="view-tabs"><button className={tab === 'timeline' ? 'active' : ''} onClick={() => setTab('timeline')}>Timeline</button><button className={tab === 'map' ? 'active' : ''} onClick={() => setTab('map')}>Route map</button></div>
+          {tab === 'map' ? <RouteMap origin={selected.origin} destination={selected.destination} locations={selected.items.filter(item => item.status !== 'REPLACED').map(item => item.location)} /> : <div className="timeline">{selected.items.map(item => <article className={`event ${item.status.toLowerCase()}`} key={item.id}><div className="event-body"><div className="event-top"><label className="eyebrow">{item.kind}</label><small>{time(item.startsAt)} – {time(item.endsAt)}</small></div><h4>{item.title}</h4><p>{item.location}</p>{item.changeNote && <p className="change">{item.changeNote}</p>}{item.status === 'CONFIRMED' && <><button disabled={busy} onClick={() => simulate(item)}>Simulate {item.kind === 'FLIGHT' ? 'cancellation' : item.kind === 'HOTEL' ? 'hotel unavailability' : 'transport issue'}</button><button disabled={busy} onClick={() => simulate(item, 'SEVERE_WEATHER')}>Simulate severe weather</button></>}{item.status === 'AFFECTED' && <button disabled={busy} onClick={() => options(item)}>Review alternatives →</button>}{item.status === 'REPLACED' && <small>Replaced</small>}</div></article>)}</div>}
+          <section className="subsection"><h3>Traveler check-in</h3><p>Record whether the traveler is safe or needs help. This is a demo check-in; no message is sent outside the app.</p><div className="check-in-current">Current: <b>{selected.checkInStatus.replace('_', ' ')}</b>{selected.checkedInAt && ` · ${time(selected.checkedInAt)}`}{selected.checkInNote && ` · ${selected.checkInNote}`}</div><input maxLength={500} value={checkInNote} onChange={e => setCheckInNote(e.target.value)} placeholder="Optional note" aria-label="Check-in note" /><div className="check-in-actions"><button disabled={busy} onClick={() => checkIn('SAFE')}>Mark safe</button><button disabled={busy} onClick={() => checkIn('NEEDS_HELP')}>Request help</button></div></section>
+          <section className="subsection"><h3>Activity history</h3>{history.length === 0 ? <p>No activity recorded yet.</p> : <ol className="history">{history.map(event => <li key={event.id}><span>{time(event.occurredAt)}</span><b>{event.type.replaceAll('_', ' ')}</b><p>{event.details}</p></li>)}</ol>}</section>
+        </>}</section>
+      </div>
     </main>
-    {creating && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setCreating(false) }}><div className="modal"><div className="modal-head"><div><label className="eyebrow">NEW ITINERARY</label><h2>Create a trip</h2></div><button className="close" onClick={() => setCreating(false)}>×</button></div><form onSubmit={create}><div className="grid"><label>Traveler<input required value={traveler} onChange={e => setTraveler(e.target.value)} placeholder="Employee name" /></label><label>Origin<input required value={origin} onChange={e => setOrigin(e.target.value)} placeholder="Pune" /></label><label>Destination<input required value={destination} onChange={e => setDestination(e.target.value)} placeholder="Delhi" /></label><label>Start date<input required type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></label><label>End date<input required type="date" min={startDate} value={endDate} onChange={e => setEndDate(e.target.value)} /></label></div><div className="form-title"><h3>Itinerary items</h3><button type="button" onClick={() => setItems([...items, blank()])}>+ Add item</button></div>{items.map((item, index) => <div className="item-form" key={index}><div className="form-title"><b>Item {index + 1}</b>{items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))}>Remove</button>}</div><div className="grid"><label>Type<select value={item.kind} onChange={e => update(index, { kind: e.target.value as Kind })}><option value="FLIGHT">Flight</option><option value="HOTEL">Hotel</option><option value="TRANSPORT">Transport</option></select></label><label>Title<input required value={item.title} onChange={e => update(index, { title: e.target.value })} placeholder="Flight AI 401" /></label><label>Location<input required value={item.location} onChange={e => update(index, { location: e.target.value })} placeholder="Airport / city" /></label><label>Starts<input required type="datetime-local" value={item.startsAt} onChange={e => update(index, { startsAt: e.target.value })} /></label><label>Ends<input required type="datetime-local" min={item.startsAt} value={item.endsAt} onChange={e => update(index, { endsAt: e.target.value })} /></label></div></div>)}<div className="actions"><button type="button" onClick={() => setCreating(false)}>Cancel</button><button className="primary" disabled={busy} type="submit">{busy ? 'Saving…' : 'Create trip'}</button></div></form></div></div>}
-    {impact && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setImpact(null) }}><div className="modal"><div className="modal-head"><div><label className="eyebrow">DISRUPTION RECOVERY</label><h2>Choose an alternative</h2><p>{impact.message}</p></div><button className="close" onClick={() => setImpact(null)}>×</button></div>{impact.alternatives.length ? impact.alternatives.map(option => <div className="option" key={option.id}><div><h3>{option.title}</h3><p>{option.description} · {option.location}</p><small>Delay: {option.delayMinutes} min · Estimated cost: ₹{option.estimatedCost.toLocaleString()}</small></div><button className="primary" disabled={busy} onClick={() => apply(option)}>Select</button></div>) : <p>No seeded alternatives available.</p>}</div></div>}
+    {creating && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setCreating(false) }}><div className="modal"><div className="modal-head"><div><label className="eyebrow">NEW ITINERARY</label><h2>Create a trip</h2></div><button className="close" onClick={() => setCreating(false)} aria-label="Close">×</button></div>{error && <div className="notice error" role="alert">{error}</div>}<form onSubmit={create}><div className="grid"><label>Traveler<input required value={traveler} onChange={e => setTraveler(e.target.value)} placeholder="Employee name" /></label><label>Origin<input required value={origin} onChange={e => setOrigin(e.target.value)} placeholder="Pune" /></label><label>Destination<input required value={destination} onChange={e => setDestination(e.target.value)} placeholder="Delhi" /></label><label>Start date<input required type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></label><label>End date<input required type="date" min={startDate} value={endDate} onChange={e => setEndDate(e.target.value)} /></label></div><div className="form-title"><h3>Itinerary items</h3><button type="button" onClick={() => setItems([...items, blank()])}>+ Add item</button></div>{items.map((item, index) => <div className="item-form" key={index}><div className="form-title"><b>Item {index + 1}</b>{items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))}>Remove</button>}</div><div className="grid"><label>Type<select value={item.kind} onChange={e => update(index, { kind: e.target.value as Kind })}><option value="FLIGHT">Flight</option><option value="HOTEL">Hotel</option><option value="TRANSPORT">Transport</option></select></label><label>Title<input required value={item.title} onChange={e => update(index, { title: e.target.value })} placeholder="Flight AI 401" /></label><label>Location<input required value={item.location} onChange={e => update(index, { location: e.target.value })} placeholder="Airport / city" /></label><label>Starts<input required type="datetime-local" value={item.startsAt} onChange={e => update(index, { startsAt: e.target.value })} /></label><label>Ends<input required type="datetime-local" min={item.startsAt} value={item.endsAt} onChange={e => update(index, { endsAt: e.target.value })} /></label></div></div>)}<div className="actions"><button type="button" onClick={() => setCreating(false)}>Cancel</button><button className="primary" disabled={busy} type="submit">{busy ? 'Saving…' : 'Create trip'}</button></div></form></div></div>}
+    {impact && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setImpact(null) }}><div className="modal"><div className="modal-head"><div><label className="eyebrow">DISRUPTION RECOVERY</label><h2>Choose an alternative</h2><p>{impact.message}</p></div><button className="close" onClick={() => setImpact(null)} aria-label="Close">×</button></div>{error && <div className="notice error" role="alert">{error}</div>}{impact.alternatives.length ? impact.alternatives.map(option => <div className="option" key={option.id}><div><h3>{option.title}</h3><p>{option.description} · {option.location}</p><small>{time(option.startsAt)} – {time(option.endsAt)} · Estimated cost: ₹{option.estimatedCost.toLocaleString()}</small></div><button className="primary" disabled={busy} onClick={() => apply(option)}>Select</button></div>) : <p>No option fits the remaining trip dates and itinerary.</p>}</div></div>}
   </div>
 }
+
 export default App
