@@ -42,16 +42,16 @@ CREATE DATABASE tripshield;
 
 Open **two PowerShell terminals** in the project root (`WT_CP`).
 
+Before the first run, open `backend/config/local.properties` and enter your MySQL password after `spring.datasource.password=`. You can change the database URL or username there too. This file is ignored by Git and Spring Boot loads it automatically when started from `backend/`. A shareable example is in `backend/config/local.properties.example`.
+
 ### Terminal 1: backend
 
 ```powershell
 cd backend
-$env:DB_USER = "root"
-$env:DB_PASSWORD = "your-mysql-password"
 mvn.cmd spring-boot:run
 ```
 
-The default database address is `jdbc:mysql://localhost:3306/tripshield`. If yours differs, set `$env:DB_URL` before starting Maven. Keep the terminal open. To check the backend, visit `http://localhost:8080/api/health`.
+The default database address is `jdbc:mysql://localhost:3306/tripshield`. Keep the terminal open. To check the backend, visit `http://127.0.0.1:8080/api/health`.
 
 ### Terminal 2: frontend
 
@@ -63,7 +63,7 @@ npm.cmd run dev
 
 Open the local URL printed by Vite, usually `http://localhost:5173`. Keep this terminal open too. On PowerShell, use `npm.cmd` if the `npm.ps1` script is blocked by the execution policy.
 
-Database credentials are read from environment variables in the backend terminal. Do not put a real password in `application.properties` or commit it to Git.
+You only need to edit `backend/config/local.properties` once, unless your database credentials change. Do not put a real password in the tracked `application.properties` or `local.properties.example` files.
 
 ## Try the demo
 
