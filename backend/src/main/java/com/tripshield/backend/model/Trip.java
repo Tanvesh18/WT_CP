@@ -11,6 +11,8 @@ public class Trip {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     public Long id;
     public String traveler;
+    public String travelerEmail;
+    public String lifecycle = "ACTIVE";
     public String origin;
     public String destination;
     public LocalDate startDate;

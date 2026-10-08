@@ -3,3 +3,14 @@
 spring.datasource.url=jdbc:mysql://localhost:3306/tripshield
 spring.datasource.username=root
 spring.datasource.password=
+
+# Set these before signing in as coordinator. Use a strong password.
+tripshield.coordinator.email=coordinator@example.com
+tripshield.coordinator.password=change-this-password
+
+# Optional SMTP alert when a traveler requests help.
+# tripshield.alert.to=coordinator@example.com
+# spring.mail.host=smtp.example.com
+# spring.mail.port=587
+# spring.mail.username=sender@example.com
+# spring.mail.password=your-app-password

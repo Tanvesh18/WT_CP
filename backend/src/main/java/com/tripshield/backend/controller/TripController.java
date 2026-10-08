@@ -20,6 +20,8 @@ import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import com.tripshield.backend.service.EmailAlerts;
+import com.tripshield.backend.security.Access;
 
 @RestController
 @RequestMapping("/api/trips")
@@ -28,19 +30,23 @@ public class TripController {
     private final TripRepository trips;
     private final AlternativeRepository alternatives;
     private final TripEventRepository events;
+    private final EmailAlerts emailAlerts;
+    private final Access access;
 
-    public TripController(TripRepository trips, AlternativeRepository alternatives, TripEventRepository events) {
-        this.trips = trips; this.alternatives = alternatives; this.events = events;
+    public TripController(TripRepository trips, AlternativeRepository alternatives, TripEventRepository events, EmailAlerts emailAlerts, Access access) {
+        this.trips = trips; this.alternatives = alternatives; this.events = events; this.emailAlerts = emailAlerts; this.access = access;
     }
 
     public record ItemInput(@NotBlank String kind, @NotBlank String title, @NotBlank String location,
                             @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt) {}
-    public record TripInput(@NotBlank String traveler, @NotBlank String origin, @NotBlank String destination,
+    public record TripInput(@NotBlank String traveler, @NotBlank @jakarta.validation.constraints.Email String travelerEmail, @NotBlank String origin, @NotBlank String destination,
                             @NotNull LocalDate startDate, @NotNull LocalDate endDate,
                             @NotEmpty List<@Valid ItemInput> items) {}
+    public record EditItemInput(Long id, @NotBlank String kind, @NotBlank String title, @NotBlank String location, @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt) {}
+    public record EditTripInput(@NotBlank String traveler, @NotBlank @jakarta.validation.constraints.Email String travelerEmail, @NotBlank String origin, @NotBlank String destination, @NotNull LocalDate startDate, @NotNull LocalDate endDate, List<@Valid EditItemInput> items) {}
     public record ItemView(Long id, String kind, String title, String location, LocalDateTime startsAt,
                            LocalDateTime endsAt, String status, String changeNote) {}
-    public record TripView(Long id, String traveler, String origin, String destination, LocalDate startDate,
+    public record TripView(Long id, String traveler, String travelerEmail, String origin, String destination, LocalDate startDate,
                            LocalDate endDate, String status, String riskLevel, String riskReason,
                            String checkInStatus, LocalDateTime checkedInAt, String checkInNote,
                            List<ItemView> items) {}
@@ -49,7 +55,7 @@ public class TripController {
     public record ImpactView(String message, ItemView affectedItem, List<Alternative> alternatives) {}
 
     @GetMapping
-    public List<TripView> list() { return trips.findAll().stream().map(this::view).toList(); }
+    public List<TripView> list() { return trips.findAll().stream().filter(access::canView).map(this::view).toList(); }
 
     @GetMapping("/{id}")
     public TripView get(@PathVariable Long id) { return view(find(id)); }
@@ -64,8 +70,9 @@ public class TripController {
     @ResponseStatus(HttpStatus.CREATED)
     public TripView create(@Valid @RequestBody TripInput input) {
         if (input.endDate().isBefore(input.startDate())) throw badRequest("End date must be after start date");
+        access.coordinator();
         Trip trip = new Trip();
-        trip.traveler = input.traveler().trim(); trip.origin = input.origin().trim();
+        trip.traveler = input.traveler().trim(); trip.travelerEmail = input.travelerEmail().trim().toLowerCase(); trip.origin = input.origin().trim();
         trip.destination = input.destination().trim(); trip.startDate = input.startDate(); trip.endDate = input.endDate();
         for (ItemInput value : input.items()) {
             if (!value.endsAt().isAfter(value.startsAt())) throw badRequest("An itinerary item must end after it starts");
@@ -82,21 +89,50 @@ public class TripController {
         return view(saved);
     }
 
+    @PutMapping("/{id}")
+    public TripView update(@PathVariable Long id, @Valid @RequestBody EditTripInput input) {
+        access.coordinator(); Trip trip = find(id);
+        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Cancelled trips cannot be edited");
+        if (input.endDate().isBefore(input.startDate())) throw badRequest("End date must be after start date");
+        trip.traveler = input.traveler().trim(); trip.travelerEmail = input.travelerEmail().trim().toLowerCase(); trip.origin = input.origin().trim(); trip.destination = input.destination().trim();
+        trip.startDate = input.startDate(); trip.endDate = input.endDate();
+        java.util.Set<Long> retained = new java.util.HashSet<>();
+        for (EditItemInput value : input.items()) {
+            if (!List.of("FLIGHT", "HOTEL", "TRANSPORT").contains(value.kind().toUpperCase())) throw badRequest("Invalid item kind");
+            if (!value.endsAt().isAfter(value.startsAt()) || value.startsAt().toLocalDate().isBefore(trip.startDate) || value.endsAt().toLocalDate().isAfter(trip.endDate)) throw badRequest("Item times must be within the trip dates");
+            TripItem item;
+            if (value.id() == null) { item = new TripItem(); item.trip = trip; trip.items.add(item); }
+            else { item = item(trip, value.id()); retained.add(item.id); if (!"CONFIRMED".equals(item.status)) throw badRequest("Only confirmed items can be edited"); }
+            item.kind = value.kind().toUpperCase(); item.title = value.title().trim(); item.location = value.location().trim();
+            item.startsAt = value.startsAt(); item.endsAt = value.endsAt();
+        }
+        trip.items.removeIf(item -> item.id != null && "CONFIRMED".equals(item.status) && !retained.contains(item.id));
+        Trip saved = trips.saveAndFlush(trip); events.save(new TripEvent(id, null, "TRIP_UPDATED", "Trip details updated")); return view(saved);
+    }
+
+    @PostMapping("/{id}/cancel")
+    public TripView cancel(@PathVariable Long id) {
+        access.coordinator(); Trip trip = find(id); trip.lifecycle = "CANCELLED";
+        events.save(new TripEvent(id, null, "TRIP_CANCELLED", "Trip cancelled")); return view(trips.save(trip));
+    }
+
     @PostMapping("/{id}/check-in")
     public TripView checkIn(@PathVariable Long id, @Valid @RequestBody CheckInInput input) {
         Trip trip = find(id);
+        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Trip is cancelled");
         String status = input.status().toUpperCase();
         if (!List.of("SAFE", "NEEDS_HELP").contains(status)) throw badRequest("Status must be SAFE or NEEDS_HELP");
         trip.checkInStatus = status; trip.checkedInAt = LocalDateTime.now();
         trip.checkInNote = input.note() == null ? null : input.note().trim();
         if (trip.checkInNote != null && trip.checkInNote.length() > 500) throw badRequest("Note is too long");
         events.save(new TripEvent(trip.id, null, "CHECK_IN", status + (trip.checkInNote == null || trip.checkInNote.isBlank() ? "" : ": " + trip.checkInNote)));
+        if ("NEEDS_HELP".equals(status)) emailAlerts.helpRequested(trip);
         return view(trips.save(trip));
     }
 
     @PostMapping("/{id}/disruptions")
     public ImpactView disrupt(@PathVariable Long id, @Valid @RequestBody DisruptionInput input) {
-        Trip trip = find(id);
+        access.coordinator(); Trip trip = find(id);
         TripItem item = item(trip, input.itemId());
         String type = input.type().toUpperCase();
         String expected = switch (type) {
@@ -123,7 +159,7 @@ public class TripController {
 
     @PostMapping("/{id}/items/{itemId}/alternatives/{alternativeId}/apply")
     public TripView apply(@PathVariable Long id, @PathVariable Long itemId, @PathVariable Long alternativeId) {
-        Trip trip = find(id); TripItem affected = item(trip, itemId);
+        access.coordinator(); Trip trip = find(id); if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Trip is cancelled"); TripItem affected = item(trip, itemId);
         if (!"AFFECTED".equals(affected.status)) throw badRequest("Item is not affected");
         Alternative option = alternatives.findById(alternativeId).orElseThrow(() -> notFound("Alternative not found"));
         if (!trip.id.equals(option.tripId) || !affected.id.equals(option.itemId)) throw badRequest("Alternative does not belong to this item");
@@ -176,7 +212,7 @@ public class TripController {
                 .noneMatch(other -> option.startsAt.isBefore(other.endsAt) && other.startsAt.isBefore(option.endsAt));
     }
 
-    private Trip find(Long id) { return trips.findById(id).orElseThrow(() -> notFound("Trip not found")); }
+    private Trip find(Long id) { Trip trip = trips.findById(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
     private TripItem item(Trip trip, Long id) {
         return trip.items.stream().filter(value -> value.id.equals(id)).findFirst()
                 .orElseThrow(() -> notFound("Itinerary item not found"));
@@ -189,11 +225,11 @@ public class TripController {
         List<ItemView> items = trip.items.stream().sorted(Comparator.comparing(i -> i.startsAt)).map(this::itemView).toList();
         long affected = items.stream().filter(i -> "AFFECTED".equals(i.status())).count();
         boolean needsHelp = "NEEDS_HELP".equals(trip.checkInStatus);
-        String status = affected > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
+        String status = "CANCELLED".equals(trip.lifecycle) ? "CANCELLED" : affected > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
         String risk = needsHelp || affected > 1 ? "HIGH" : affected == 1 ? "MEDIUM" : "LOW";
         String reason = needsHelp ? "Traveler requested help" : affected > 1 ? "Multiple unresolved disruptions"
                 : affected == 1 ? "One unresolved disruption" : "No active disruption or help request";
-        return new TripView(trip.id, trip.traveler, trip.origin, trip.destination, trip.startDate,
+        return new TripView(trip.id, trip.traveler, trip.travelerEmail, trip.origin, trip.destination, trip.startDate,
                 trip.endDate, status, risk, reason, trip.checkInStatus == null ? "PENDING" : trip.checkInStatus,
                 trip.checkedInAt, trip.checkInNote, items);
     }

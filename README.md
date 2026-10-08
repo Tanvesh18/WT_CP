@@ -65,6 +65,19 @@ Open the local URL printed by Vite, usually `http://localhost:5173`. Keep this t
 
 You only need to edit `backend/config/local.properties` once, unless your database credentials change. Do not put a real password in the tracked `application.properties` or `local.properties.example` files.
 
+## Accounts and new features
+
+Before using the new interface, add these lines to the ignored `backend/config/local.properties` and restart the backend:
+
+```properties
+tripshield.coordinator.email=coordinator@example.com
+tripshield.coordinator.password=choose-a-strong-password
+```
+
+Sign in as coordinator to create, edit, search, filter, and cancel trips. Existing trips remain in MySQL. Edit each existing trip once to add the traveler's email address. A traveler can register from the sign-in screen using that same email address and then view their assigned trips and submit a check-in. Account sessions last until backend restart or sign-out.
+
+The dashboard shows status, destination, and disruption counts. Cancellation keeps a trip and its history for review. To send a real email when a traveler requests help, configure `tripshield.alert.to` and the `spring.mail.*` SMTP properties shown in `backend/config/local.properties.example`. Without SMTP settings, check-ins still work and are saved, but no email is sent.
+
 ## Try the demo
 
 1. Create a trip and add at least one itinerary item. Item start and end times must fall within the trip dates.
@@ -91,7 +104,7 @@ For a check-in, send JSON such as `{ "status": "SAFE", "note": "Reached the hote
 
 ## Current scope
 
-This is a prototype using generated sample alternatives and simulated disruptions. The map is a schematic view of supported Indian city coordinates; it is not a live map or location tracker. Live flight/hotel/weather integrations, user accounts, and external notification delivery are not implemented. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
+This is a prototype using generated sample alternatives and simulated disruptions. The map is a schematic view of supported Indian city coordinates; it is not a live map or location tracker. Live flight/hotel/weather integrations are not implemented. Account login and optional SMTP help-request alerts are available after local configuration. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
 
 The frontend build and lint checks pass. A full backend run needs Java, MySQL, and Maven access to its dependencies.
 

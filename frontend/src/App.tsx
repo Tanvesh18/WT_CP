@@ -4,18 +4,19 @@ import './App.css'
 
 type Kind = 'FLIGHT' | 'HOTEL' | 'TRANSPORT'
 type Item = { id: number; kind: Kind; title: string; location: string; startsAt: string; endsAt: string; status: string; changeNote: string | null }
-type Trip = { id: number; traveler: string; origin: string; destination: string; startDate: string; endDate: string; status: string; riskLevel: string; riskReason: string; checkInStatus: string; checkedInAt: string | null; checkInNote: string | null; items: Item[] }
+type Trip = { id: number; traveler: string; travelerEmail: string; origin: string; destination: string; startDate: string; endDate: string; status: string; riskLevel: string; riskReason: string; checkInStatus: string; checkedInAt: string | null; checkInNote: string | null; items: Item[] }
 type Alternative = { id: number; kind: Kind; title: string; location: string; startsAt: string; endsAt: string; delayMinutes: number; estimatedCost: number; description: string }
 type Impact = { message: string; affectedItem: Item; alternatives: Alternative[] }
 type TripEvent = { id: number; type: string; details: string; occurredAt: string }
 type ItemDraft = { kind: Kind; title: string; location: string; startsAt: string; endsAt: string }
 
+type Session = { token: string; name: string; email: string; role: 'COORDINATOR' | 'TRAVELER' }
 const blank = (): ItemDraft => ({ kind: 'FLIGHT', title: '', location: '', startsAt: '', endsAt: '' })
 const disruption: Record<Kind, string> = { FLIGHT: 'FLIGHT_CANCELLATION', HOTEL: 'HOTEL_UNAVAILABLE', TRANSPORT: 'TRANSPORT_DISRUPTION' }
 const time = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
+  const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(sessionStorage.getItem('tripshield-token') ? { Authorization: `Bearer ${sessionStorage.getItem('tripshield-token')}` } : {}), ...init?.headers } })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || data.message || `Request failed (${response.status})`)
@@ -24,12 +25,21 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function App() {
+  const [session, setSession] = useState<Session | null>(() => { const raw = sessionStorage.getItem('tripshield-session'); return raw ? JSON.parse(raw) : null })
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
+  const [authName, setAuthName] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('ALL')
   const [trips, setTrips] = useState<Trip[]>([])
   const [selectedId, select] = useState<number | null>(null)
   const [history, setHistory] = useState<TripEvent[]>([])
   const [tab, setTab] = useState<'timeline' | 'map'>('timeline')
   const [creating, setCreating] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [traveler, setTraveler] = useState('')
+  const [travelerEmail, setTravelerEmail] = useState('')
   const [origin, setOrigin] = useState('')
   const [destination, setDestination] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -42,17 +52,23 @@ function App() {
   const [busy, setBusy] = useState(false)
   const selected = trips.find(trip => trip.id === selectedId)
   const attention = trips.filter(trip => trip.status === 'NEEDS_ATTENTION').length
+  const active = trips.filter(trip => trip.status === 'ON_TRACK').length
+  const cancelled = trips.filter(trip => trip.status === 'CANCELLED').length
+  const filtered = trips.filter(trip => { const term = query.toLowerCase(); return (statusFilter === 'ALL' || trip.status === statusFilter) && [trip.traveler, trip.travelerEmail, trip.origin, trip.destination, trip.startDate, trip.endDate].some(value => value?.toLowerCase().includes(term)) })
+  const byDestination = Object.entries(trips.reduce<Record<string, number>>((counts, trip) => { counts[trip.destination] = (counts[trip.destination] || 0) + 1; return counts }, {})).sort((a,b) => b[1]-a[1]).slice(0,5)
+  const disruptionCounts = Object.entries(trips.flatMap(trip => trip.items).filter(item => item.changeNote && ['AFFECTED', 'REPLACED'].includes(item.status)).reduce<Record<string, number>>((counts, item) => { const key = item.changeNote || 'Other'; counts[key] = (counts[key] || 0) + 1; return counts }, {}))
 
   useEffect(() => {
+    if (!session) return
     api<Trip[]>('/trips').then(data => {
       setTrips(data)
       select(data[0]?.id ?? null)
     }).catch(err => setError(err.message))
-  }, [])
+  }, [session])
   useEffect(() => {
-    if (selectedId === null) return
+    if (selectedId === null || !session) return
     api<TripEvent[]>(`/trips/${selectedId}/history`).then(setHistory).catch(err => setError(err.message))
-  }, [selectedId])
+  }, [selectedId, session])
 
   async function refresh(id?: number) {
     const data = await api<Trip[]>('/trips')
@@ -70,13 +86,20 @@ function App() {
   function update(index: number, value: Partial<ItemDraft>) {
     setItems(current => current.map((item, i) => i === index ? { ...item, ...value } : item))
   }
+  function submitAuth(event: FormEvent) {
+    event.preventDefault()
+    run(async () => { const result = await api<Session>(`/auth/${authMode}`, { method: 'POST', body: JSON.stringify({ name: authName, email: authEmail, password: authPassword }) }); sessionStorage.setItem('tripshield-token', result.token); sessionStorage.setItem('tripshield-session', JSON.stringify(result)); setSession(result); setAuthPassword('') })
+  }
+  function logout() { api('/auth/logout', { method: 'POST' }).catch(() => {}); sessionStorage.removeItem('tripshield-token'); sessionStorage.removeItem('tripshield-session'); setSession(null); setTrips([]); select(null) }
+  function edit(trip: Trip) { setEditingId(trip.id); setTraveler(trip.traveler); setTravelerEmail(trip.travelerEmail || ''); setOrigin(trip.origin); setDestination(trip.destination); setStartDate(trip.startDate); setEndDate(trip.endDate); setItems(trip.items.filter(item => item.status === 'CONFIRMED').map(item => ({ ...item }))); setCreating(true) }
+  function cancelTrip() { if (!selected || !window.confirm(`Cancel trip #${selected.id}?`)) return; run(async () => { await api(`/trips/${selected.id}/cancel`, { method: 'POST' }); await refresh(selected.id); setNotice('Trip cancelled.') }) }
   function create(event: FormEvent) {
     event.preventDefault()
     run(async () => {
-      const trip = await api<Trip>('/trips', { method: 'POST', body: JSON.stringify({ traveler, origin, destination, startDate, endDate, items }) })
+      const trip = await api<Trip>(editingId ? `/trips/${editingId}` : '/trips', { method: editingId ? 'PUT' : 'POST', body: JSON.stringify({ traveler, travelerEmail, origin, destination, startDate, endDate, items }) })
       await refresh(trip.id)
-      setCreating(false); setItems([blank()]); setTraveler(''); setOrigin(''); setDestination(''); setStartDate(''); setEndDate('')
-      setNotice('Trip created successfully.')
+      setCreating(false); setEditingId(null); setItems([blank()]); setTravelerEmail(''); setTraveler(''); setOrigin(''); setDestination(''); setStartDate(''); setEndDate('')
+      setNotice(editingId ? 'Trip updated.' : 'Trip created successfully.')
     })
   }
   function simulate(item: Item, type = disruption[item.kind]) {
@@ -106,25 +129,29 @@ function App() {
     })
   }
 
+  if (!session) return <div className="auth-page"><form className="auth-card" onSubmit={submitAuth}><h1>TripShield</h1><p>{authMode === 'login' ? 'Sign in to your trips' : 'Create a traveler account'}</p>{error && <div className="notice error">{error}</div>}{authMode === 'register' && <label>Name<input required value={authName} onChange={e => setAuthName(e.target.value)} /></label>}<label>Email<input required type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} /></label><label>Password<input required type="password" minLength={authMode === 'register' ? 8 : undefined} value={authPassword} onChange={e => setAuthPassword(e.target.value)} /></label><button className="primary" disabled={busy}>{authMode === 'login' ? 'Sign in' : 'Register'}</button><button type="button" className="link-button" onClick={() => { setError(''); setAuthMode(authMode === 'login' ? 'register' : 'login') }}>{authMode === 'login' ? 'Create traveler account' : 'Back to sign in'}</button></form></div>
+
   return <div className="app">
-    <header><div className="brand"><span>✦</span> TripShield</div><small>Corporate travel operations</small></header>
+    <header><div className="brand"><span>✦</span> TripShield</div><div className="account"><small>{session.name} · {session.role.toLowerCase()}</small><button onClick={logout}>Sign out</button></div></header>
     <main>
-      <div className="heading"><div><label className="eyebrow">TRAVEL CONTROL CENTER</label><h1>Stay ahead of every trip.</h1><p>Plan travel, spot disruptions, and keep everyone moving.</p></div><button className="primary" onClick={() => setCreating(true)}>+ New trip</button></div>
+      <div className="heading"><div><label className="eyebrow">TRAVEL CONTROL CENTER</label><h1>Stay ahead of every trip.</h1><p>Plan travel, spot disruptions, and keep everyone moving.</p></div>{session.role === 'COORDINATOR' && <button className="primary" onClick={() => { setEditingId(null); setTraveler(''); setTravelerEmail(''); setOrigin(''); setDestination(''); setStartDate(''); setEndDate(''); setItems([blank()]); setCreating(true) }}>+ New trip</button>}</div>
       {error && <div className="notice error" role="alert">{error}</div>}{notice && <div className="notice success" role="status">{notice}</div>}
-      <section className="stats"><div><small>Total trips</small><strong>{trips.length}</strong></div><div><small>Need attention</small><strong className="warn">{attention}</strong></div><div><small>On track</small><strong>{trips.length - attention}</strong></div></section>
+      <section className="stats"><div><small>Total trips</small><strong>{trips.length}</strong></div><div><small>Need attention</small><strong className="warn">{attention}</strong></div><div><small>On track</small><strong>{active}</strong></div></section>
+      <section className="dashboard panel"><h2>Dashboard</h2><div className="chart-grid"><div><h3>Trip status</h3>{[['On track', active], ['Needs attention', attention], ['Cancelled', cancelled]].map(([label, value]) => <div className="bar-row" key={label}><span>{label}</span><div className="bar-track"><i style={{ width: `${trips.length ? Number(value) / trips.length * 100 : 0}%` }} /></div><b>{value}</b></div>)}</div><div><h3>Top destinations</h3>{byDestination.map(([label, value]) => <div className="bar-row" key={label}><span>{label}</span><div className="bar-track"><i style={{ width: `${value / trips.length * 100}%` }} /></div><b>{value}</b></div>)}</div><div><h3>Disruptions</h3>{disruptionCounts.length ? disruptionCounts.map(([label, value]) => <div className="bar-row" key={label}><span>{label.replaceAll('_', ' ')}</span><div className="bar-track"><i style={{ width: `${value / Math.max(...disruptionCounts.map(([, n]) => n)) * 100}%` }} /></div><b>{value}</b></div>) : <p className="muted">No disruptions yet</p>}</div></div></section>
       <div className="workspace">
-        <aside className="panel"><h2>Trips <small>{trips.length}</small></h2>{trips.length === 0 && <p className="muted">Create your first trip to get started.</p>}{trips.map(trip => <button className={`trip ${selectedId === trip.id ? 'selected' : ''}`} key={trip.id} onClick={() => { select(trip.id); setImpact(null); setTab('timeline') }}><b>{trip.origin} → {trip.destination}</b><small>{trip.traveler} · {trip.startDate}</small><span className={`badge ${trip.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{trip.status === 'NEEDS_ATTENTION' ? 'Needs attention' : 'On track'}</span><span className={`risk ${trip.riskLevel.toLowerCase()}`}>{trip.riskLevel} risk</span></button>)}</aside>
+        <aside className="panel"><h2>Trips <small>{filtered.length}</small></h2><input className="search" placeholder="Search traveler, place, date" value={query} onChange={e => setQuery(e.target.value)} /><select className="search" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="ALL">All statuses</option><option value="ON_TRACK">On track</option><option value="NEEDS_ATTENTION">Needs attention</option><option value="CANCELLED">Cancelled</option></select>{trips.length === 0 && <p className="muted">Create your first trip to get started.</p>}{filtered.map(trip => <button className={`trip ${selectedId === trip.id ? 'selected' : ''}`} key={trip.id} onClick={() => { select(trip.id); setImpact(null); setTab('timeline') }}><b>{trip.origin} → {trip.destination}</b><small>{trip.traveler} · {trip.startDate}</small><span className={`badge ${trip.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{trip.status === 'NEEDS_ATTENTION' ? 'Needs attention' : trip.status === 'CANCELLED' ? 'Cancelled' : 'On track'}</span><span className={`risk ${trip.riskLevel.toLowerCase()}`}>{trip.riskLevel} risk</span></button>)}</aside>
         <section className="panel detail">{!selected ? <div className="empty"><span>✈</span><h2>Your trips will appear here</h2><p>Create a trip to try disruption recovery.</p></div> : <>
-          <div className="detail-head"><div><label className="eyebrow">TRIP #{selected.id}</label><h2>{selected.origin} → {selected.destination}</h2><p>{selected.traveler} · {selected.startDate} to {selected.endDate}</p></div><span className={`badge ${selected.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{selected.status === 'NEEDS_ATTENTION' ? 'Needs attention' : 'On track'}</span></div>
+          <div className="detail-head"><div><label className="eyebrow">TRIP #{selected.id}</label><h2>{selected.origin} → {selected.destination}</h2><p>{selected.traveler} · {selected.startDate} to {selected.endDate}</p></div><span className={`badge ${selected.status === 'NEEDS_ATTENTION' ? 'bad' : 'good'}`}>{selected.status === 'NEEDS_ATTENTION' ? 'Needs attention' : selected.status === 'CANCELLED' ? 'Cancelled' : 'On track'}</span></div>
+          {session.role === 'COORDINATOR' && selected.status !== 'CANCELLED' && <div className="trip-actions"><button onClick={() => edit(selected)}>Edit trip</button><button onClick={cancelTrip}>Cancel trip</button></div>}
           <div className="risk-card"><strong className={`risk ${selected.riskLevel.toLowerCase()}`}>{selected.riskLevel} risk</strong><span>{selected.riskReason}</span></div>
           <div className="view-tabs"><button className={tab === 'timeline' ? 'active' : ''} onClick={() => setTab('timeline')}>Timeline</button><button className={tab === 'map' ? 'active' : ''} onClick={() => setTab('map')}>Route map</button></div>
-          {tab === 'map' ? <RouteMap origin={selected.origin} destination={selected.destination} locations={selected.items.filter(item => item.status !== 'REPLACED').map(item => item.location)} /> : <div className="timeline">{selected.items.map(item => <article className={`event ${item.status.toLowerCase()}`} key={item.id}><div className="event-body"><div className="event-top"><label className="eyebrow">{item.kind}</label><small>{time(item.startsAt)} – {time(item.endsAt)}</small></div><h4>{item.title}</h4><p>{item.location}</p>{item.changeNote && <p className="change">{item.changeNote}</p>}{item.status === 'CONFIRMED' && <><button disabled={busy} onClick={() => simulate(item)}>Simulate {item.kind === 'FLIGHT' ? 'cancellation' : item.kind === 'HOTEL' ? 'hotel unavailability' : 'transport issue'}</button><button disabled={busy} onClick={() => simulate(item, 'SEVERE_WEATHER')}>Simulate severe weather</button></>}{item.status === 'AFFECTED' && <button disabled={busy} onClick={() => options(item)}>Review alternatives →</button>}{item.status === 'REPLACED' && <small>Replaced</small>}</div></article>)}</div>}
-          <section className="subsection"><h3>Traveler check-in</h3><p>Record whether the traveler is safe or needs help. This is a demo check-in; no message is sent outside the app.</p><div className="check-in-current">Current: <b>{selected.checkInStatus.replace('_', ' ')}</b>{selected.checkedInAt && ` · ${time(selected.checkedInAt)}`}{selected.checkInNote && ` · ${selected.checkInNote}`}</div><input maxLength={500} value={checkInNote} onChange={e => setCheckInNote(e.target.value)} placeholder="Optional note" aria-label="Check-in note" /><div className="check-in-actions"><button disabled={busy} onClick={() => checkIn('SAFE')}>Mark safe</button><button disabled={busy} onClick={() => checkIn('NEEDS_HELP')}>Request help</button></div></section>
+          {tab === 'map' ? <RouteMap origin={selected.origin} destination={selected.destination} locations={selected.items.filter(item => item.status !== 'REPLACED').map(item => item.location)} /> : <div className="timeline">{selected.items.map(item => <article className={`event ${item.status.toLowerCase()}`} key={item.id}><div className="event-body"><div className="event-top"><label className="eyebrow">{item.kind}</label><small>{time(item.startsAt)} – {time(item.endsAt)}</small></div><h4>{item.title}</h4><p>{item.location}</p>{item.changeNote && <p className="change">{item.changeNote}</p>}{session.role === 'COORDINATOR' && selected.status !== 'CANCELLED' && item.status === 'CONFIRMED' && <><button disabled={busy} onClick={() => simulate(item)}>Simulate {item.kind === 'FLIGHT' ? 'cancellation' : item.kind === 'HOTEL' ? 'hotel unavailability' : 'transport issue'}</button><button disabled={busy} onClick={() => simulate(item, 'SEVERE_WEATHER')}>Simulate severe weather</button></>}{session.role === 'COORDINATOR' && selected.status !== 'CANCELLED' && item.status === 'AFFECTED' && <button disabled={busy} onClick={() => options(item)}>Review alternatives →</button>}{item.status === 'REPLACED' && <small>Replaced</small>}</div></article>)}</div>}
+          <section className="subsection"><h3>Traveler check-in</h3><p>Record whether the traveler is safe or needs help. This is a demo check-in; no message is sent outside the app.</p><div className="check-in-current">Current: <b>{selected.checkInStatus.replace('_', ' ')}</b>{selected.checkedInAt && ` · ${time(selected.checkedInAt)}`}{selected.checkInNote && ` · ${selected.checkInNote}`}</div><input maxLength={500} value={checkInNote} onChange={e => setCheckInNote(e.target.value)} placeholder="Optional note" aria-label="Check-in note" /><div className="check-in-actions"><button disabled={busy || selected.status === 'CANCELLED'} onClick={() => checkIn('SAFE')}>Mark safe</button><button disabled={busy || selected.status === 'CANCELLED'} onClick={() => checkIn('NEEDS_HELP')}>Request help</button></div></section>
           <section className="subsection"><h3>Activity history</h3>{history.length === 0 ? <p>No activity recorded yet.</p> : <ol className="history">{history.map(event => <li key={event.id}><span>{time(event.occurredAt)}</span><b>{event.type.replaceAll('_', ' ')}</b><p>{event.details}</p></li>)}</ol>}</section>
         </>}</section>
       </div>
     </main>
-    {creating && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setCreating(false) }}><div className="modal"><div className="modal-head"><div><label className="eyebrow">NEW ITINERARY</label><h2>Create a trip</h2></div><button className="close" onClick={() => setCreating(false)} aria-label="Close">×</button></div>{error && <div className="notice error" role="alert">{error}</div>}<form onSubmit={create}><div className="grid"><label>Traveler<input required value={traveler} onChange={e => setTraveler(e.target.value)} placeholder="Employee name" /></label><label>Origin<input required value={origin} onChange={e => setOrigin(e.target.value)} placeholder="Pune" /></label><label>Destination<input required value={destination} onChange={e => setDestination(e.target.value)} placeholder="Delhi" /></label><label>Start date<input required type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></label><label>End date<input required type="date" min={startDate} value={endDate} onChange={e => setEndDate(e.target.value)} /></label></div><div className="form-title"><h3>Itinerary items</h3><button type="button" onClick={() => setItems([...items, blank()])}>+ Add item</button></div>{items.map((item, index) => <div className="item-form" key={index}><div className="form-title"><b>Item {index + 1}</b>{items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))}>Remove</button>}</div><div className="grid"><label>Type<select value={item.kind} onChange={e => update(index, { kind: e.target.value as Kind })}><option value="FLIGHT">Flight</option><option value="HOTEL">Hotel</option><option value="TRANSPORT">Transport</option></select></label><label>Title<input required value={item.title} onChange={e => update(index, { title: e.target.value })} placeholder="Flight AI 401" /></label><label>Location<input required value={item.location} onChange={e => update(index, { location: e.target.value })} placeholder="Airport / city" /></label><label>Starts<input required type="datetime-local" value={item.startsAt} onChange={e => update(index, { startsAt: e.target.value })} /></label><label>Ends<input required type="datetime-local" min={item.startsAt} value={item.endsAt} onChange={e => update(index, { endsAt: e.target.value })} /></label></div></div>)}<div className="actions"><button type="button" onClick={() => setCreating(false)}>Cancel</button><button className="primary" disabled={busy} type="submit">{busy ? 'Saving…' : 'Create trip'}</button></div></form></div></div>}
+    {creating && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setCreating(false) }}><div className="modal"><div className="modal-head"><div><label className="eyebrow">NEW ITINERARY</label><h2>{editingId ? 'Edit trip' : 'Create a trip'}</h2></div><button className="close" onClick={() => setCreating(false)} aria-label="Close">×</button></div>{error && <div className="notice error" role="alert">{error}</div>}<form onSubmit={create}><div className="grid"><label>Traveler<input required value={traveler} onChange={e => setTraveler(e.target.value)} placeholder="Employee name" /></label><label>Traveler email<input required type="email" value={travelerEmail} onChange={e => setTravelerEmail(e.target.value)} placeholder="traveler@example.com" /></label><label>Origin<input required value={origin} onChange={e => setOrigin(e.target.value)} placeholder="Pune" /></label><label>Destination<input required value={destination} onChange={e => setDestination(e.target.value)} placeholder="Delhi" /></label><label>Start date<input required type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></label><label>End date<input required type="date" min={startDate} value={endDate} onChange={e => setEndDate(e.target.value)} /></label></div><div className="form-title"><h3>Itinerary items</h3><button type="button" onClick={() => setItems([...items, blank()])}>+ Add item</button></div>{items.map((item, index) => <div className="item-form" key={index}><div className="form-title"><b>Item {index + 1}</b>{items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))}>Remove</button>}</div><div className="grid"><label>Type<select value={item.kind} onChange={e => update(index, { kind: e.target.value as Kind })}><option value="FLIGHT">Flight</option><option value="HOTEL">Hotel</option><option value="TRANSPORT">Transport</option></select></label><label>Title<input required value={item.title} onChange={e => update(index, { title: e.target.value })} placeholder="Flight AI 401" /></label><label>Location<input required value={item.location} onChange={e => update(index, { location: e.target.value })} placeholder="Airport / city" /></label><label>Starts<input required type="datetime-local" value={item.startsAt} onChange={e => update(index, { startsAt: e.target.value })} /></label><label>Ends<input required type="datetime-local" min={item.startsAt} value={item.endsAt} onChange={e => update(index, { endsAt: e.target.value })} /></label></div></div>)}<div className="actions"><button type="button" onClick={() => setCreating(false)}>Cancel</button><button className="primary" disabled={busy} type="submit">{busy ? 'Saving…' : editingId ? 'Save changes' : 'Create trip'}</button></div></form></div></div>}
     {impact && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setImpact(null) }}><div className="modal"><div className="modal-head"><div><label className="eyebrow">DISRUPTION RECOVERY</label><h2>Choose an alternative</h2><p>{impact.message}</p></div><button className="close" onClick={() => setImpact(null)} aria-label="Close">×</button></div>{error && <div className="notice error" role="alert">{error}</div>}{impact.alternatives.length ? impact.alternatives.map(option => <div className="option" key={option.id}><div><h3>{option.title}</h3><p>{option.description} · {option.location}</p><small>{time(option.startsAt)} – {time(option.endsAt)} · Estimated cost: ₹{option.estimatedCost.toLocaleString()}</small></div><button className="primary" disabled={busy} onClick={() => apply(option)}>Select</button></div>) : <p>No option fits the remaining trip dates and itinerary.</p>}</div></div>}
   </div>
 }
