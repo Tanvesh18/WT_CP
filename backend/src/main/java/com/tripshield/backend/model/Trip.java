@@ -15,6 +15,8 @@ public class Trip {
     public String lifecycle = "ACTIVE";
     public String origin;
     public String destination;
+    public String originAirportCode;
+    public String destinationAirportCode;
     public LocalDate startDate;
     public LocalDate endDate;
     public String checkInStatus = "PENDING";

@@ -28,3 +28,44 @@ test('trip filters combine traveler, risk, and overlapping date range', () => {
   assert.deepEqual(Array.from(filterTrips(trips, { ...emptyCriteria(), query: 'delhi', risk: 'HIGH' }), t => t.id), [2])
   assert.deepEqual(Array.from(filterTrips(trips, { ...emptyCriteria(), sort: 'RISK' }), t => t.id), [2, 1])
 })
+
+const { searchAirports } = load('airports.ts')
+const { offerExpired, money } = load('flightOffers.ts')
+test('airport search matches city and IATA code while excluding selected airport', () => {
+  assert.ok(searchAirports('pune').some(airport => airport.code === 'PNQ'))
+  assert.ok(searchAirports('DEL').some(airport => airport.city === 'New Delhi'))
+  assert.equal(searchAirports('Pune', 'PNQ').length, 0)
+})
+test('flight offer selection rejects expired offers and formats currency', () => {
+  assert.equal(offerExpired({ expiresAt: '2000-01-01T00:00:00Z' }), true)
+  assert.equal(offerExpired({ expiresAt: '2999-01-01T00:00:00Z' }), false)
+  assert.match(money('1234.50', 'INR'), /1,234/)
+})
+
+const { activeToday, attentionTrips, departuresSoon, upcomingTrips, nextSegment } = load('dashboard.ts')
+test('overview counts trips by dates and prioritizes help requests', () => {
+  const base = { traveler: 'Ana', travelerEmail: 'ana@example.test', origin: 'Pune', destination: 'Delhi', endDate: '2026-11-12', riskLevel: 'LOW', checkInStatus: 'PENDING', items: [] }
+  const trips = [
+    { ...base, id: 1, startDate: '2026-11-10', status: 'ON_TRACK' },
+    { ...base, id: 2, startDate: '2026-11-11', status: 'NEEDS_ATTENTION', riskLevel: 'HIGH', checkInStatus: 'NEEDS_HELP' },
+    { ...base, id: 3, startDate: '2026-11-10', status: 'CANCELLED' },
+  ]
+  assert.deepEqual(Array.from(activeToday(trips, '2026-11-10'), t => t.id), [1])
+  assert.deepEqual(Array.from(departuresSoon(trips, '2026-11-10'), t => t.id), [1, 2])
+  assert.deepEqual(Array.from(attentionTrips(trips), t => t.id), [2])
+  assert.deepEqual(Array.from(upcomingTrips(trips, '2026-11-10'), t => t.id), [1, 2])
+})
+test('traveler overview chooses next active itinerary segment', () => {
+  const trip = { items: [{ id: 1, status: 'REPLACED', startsAt: '2026-11-10T08:00', endsAt: '2026-11-10T09:00' }, { id: 2, status: 'CONFIRMED', startsAt: '2026-11-10T10:00', endsAt: '2026-11-10T12:00' }] }
+  assert.equal(nextSegment(trip, '2026-11-10T09:30').id, 2)
+})
+
+const { routePoints } = load('routeGeometry.ts')
+test('flight map keeps actual connecting and technical airport coordinates', () => {
+  const legs = [
+    { origin: 'PNQ', originName: 'Pune', originLatitude: 18.58, originLongitude: 73.9, destination: 'BOM', destinationName: 'Mumbai', destinationLatitude: 19.09, destinationLongitude: 72.87, technicalStops: [] },
+    { origin: 'BOM', destination: 'DEL', destinationName: 'Delhi', destinationLatitude: 28.55, destinationLongitude: 77.1, technicalStops: [{ code: 'JAI', name: 'Jaipur', latitude: 26.82, longitude: 75.8 }] },
+  ]
+  assert.deepEqual(Array.from(routePoints(JSON.stringify(legs)), point => point.code), ['PNQ', 'BOM', 'JAI', 'DEL'])
+  assert.equal(routePoints('invalid').length, 0)
+})

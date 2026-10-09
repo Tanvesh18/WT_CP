@@ -19,4 +19,16 @@ public class TripItem {
     public String disruptionType;
     public Long riskSourceItemId;
     public Long replacesItemId;
+    public String flightSource;
+    public String flightOfferId;
+    public String flightAmount;
+    public String flightCurrency;
+    public String flightExpiresAt;
+    public String flightOriginTimeZone;
+    public String flightDestinationTimeZone;
+    public Integer flightDurationMinutes;
+    public Integer flightStops;
+    public String flightOperatingCarriers;
+    @Column(columnDefinition = "TEXT") public String flightRouteJson;
+    public String recoverySearchId;
 }

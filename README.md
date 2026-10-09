@@ -117,3 +117,19 @@ Run `npm.cmd run test`, `npm.cmd run build`, and `npm.cmd run lint` from `fronte
 ## Package lockfiles
 
 `frontend/package-lock.json` belongs to the React app and should be kept so installs use the recorded dependency versions. The `package-lock.json` in the `WT_CP` root is an empty npm lockfile with no matching root `package.json`; the project does not need it. Run npm commands from `frontend/`.
+
+## Duffel flight search
+
+Coordinators can search economy flights for one adult from the trip editor using three-letter airport codes (for example, PNQ to DEL). Add `tripshield.duffel.token=duffel_test_...` to the ignored `backend/config/local.properties` and restart the backend. Obtain the token from your Duffel dashboard. The token is used only by Spring Boot and must not be placed in the frontend. Without a token, search shows a configuration error; manual itinerary entry still works.
+
+Duffel test tokens return simulated offers. A live token can return real offers on routes supported by Duffel. Selecting an offer saves its schedule, price, source, and offer ID as an itinerary snapshot. It does **not** book or pay for a ticket. Offers expire and price or availability may change. Disruption recovery alternatives remain simulated.
+
+## Creating a trip
+
+Coordinators use **New trip** to open the full-page planner: choose airports and travel dates, assign a registered traveler (or a guest email), search and select Duffel outbound/optional return offers, add optional seeded stay and airport transfer templates, then review the itinerary and estimated costs. Airport suggestions are a curated search aid; only the Duffel API supplies flight results. Hotel and transfer templates are planning examples, not reservations. Flight offers are checked again with Duffel when a new trip is saved, and expired offers must be searched again. The app saves an itinerary, not an airline ticket. Existing trips remain editable from the trip workspace.
+
+## Flight route map and disruption recovery
+
+Selected Duffel offers now save their airport coordinates and flight legs. The trip workspace places a geographic route map beside the itinerary timeline, and the flight-selection step previews the same route immediately. The map uses OpenStreetMap tiles with visible attribution; the overlay plots airport coordinates from Duffel. Its connecting lines are geographic guides, not tracked aircraft paths. Older flights without saved coordinates show a clear fallback. Browser access to the tile server is needed for the basemap.
+
+For a simulated cancellation of a Duffel flight, TripShield searches Duffel again for the flight route and departure date. Replacement offers show arrival delay, fare difference when currencies match, and downstream itinerary risks. Refreshing starts a new search and makes older offers inapplicable. The backend verifies an offer again before adding it as an itinerary replacement. This does **not** book, pay for, or change an airline ticket. Duffel test-token results remain simulated. Recovery options for hotel, ground transport, and other prototype disruptions remain simulated and are labeled accordingly.

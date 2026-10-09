@@ -17,7 +17,11 @@ public class DisruptionPlanner {
     public record SegmentImpact(Long id, String title, String kind, int bufferMinutes, int requiredMinutes, String reason) {}
     public record OptionView(Long id, String kind, String title, String location, LocalDateTime startsAt,
                              LocalDateTime endsAt, int delayMinutes, java.math.BigDecimal estimatedCost,
-                             String description, String practicality, List<SegmentImpact> impactedSegments) {}
+                             String description, String practicality, List<SegmentImpact> impactedSegments,
+                             String source, String currency, String flightOfferId, String flightExpiresAt,
+                             Integer arrivalDelayMinutes, java.math.BigDecimal costDifference,
+                             Integer flightStops, Integer flightDurationMinutes, String flightOperatingCarriers,
+                             String flightOriginTimeZone, String flightDestinationTimeZone) {}
 
     public int assumedDelay(String type) {
         return switch (type) {
@@ -170,11 +174,20 @@ public class DisruptionPlanner {
         if (!affected.kind.equals(option.kind) || option.startsAt == null || option.endsAt == null) return false;
         LocalDateTime earliest = earliestFeasibleStart(trip, affected);
         if (earliest != null && option.startsAt.isBefore(earliest)) return false;
-        if (!option.endsAt.isAfter(option.startsAt) || option.startsAt.toLocalDate().isBefore(trip.startDate)
+        if (!chronological(option) || option.startsAt.toLocalDate().isBefore(trip.startDate)
                 || option.endsAt.toLocalDate().isAfter(trip.endDate)) return false;
         return trip.items.stream().filter(other -> !other.id.equals(affected.id) && ("CONFIRMED".equals(other.status) || "AT_RISK".equals(other.status))
                         && other.kind.equals(affected.kind))
                 .noneMatch(other -> option.startsAt.isBefore(other.endsAt) && other.startsAt.isBefore(option.endsAt));
+    }
+
+    private boolean chronological(Alternative option) {
+        if (option.flightOriginTimeZone != null && option.flightDestinationTimeZone != null) {
+            try { return option.endsAt.atZone(java.time.ZoneId.of(option.flightDestinationTimeZone)).toInstant()
+                    .isAfter(option.startsAt.atZone(java.time.ZoneId.of(option.flightOriginTimeZone)).toInstant()); }
+            catch (Exception ignored) { return false; }
+        }
+        return option.endsAt.isAfter(option.startsAt);
     }
 
     public OptionView describe(Trip trip, TripItem affected, Alternative option) {
@@ -182,6 +195,9 @@ public class DisruptionPlanner {
         String practicality = impacts.isEmpty() ? "Protects the remaining itinerary"
                 : impacts.size() == 1 ? "One connection needs attention" : impacts.size() + " segments need attention";
         return new OptionView(option.id, option.kind, option.title, option.location, option.startsAt,
-                option.endsAt, option.delayMinutes, option.estimatedCost, option.description, practicality, impacts);
+                option.endsAt, option.delayMinutes, option.estimatedCost, option.description, practicality, impacts,
+                option.source, option.currency, option.flightOfferId, option.flightExpiresAt,
+                option.arrivalDelayMinutes, option.costDifference, option.flightStops, option.flightDurationMinutes, option.flightOperatingCarriers,
+                option.flightOriginTimeZone, option.flightDestinationTimeZone);
     }
 }

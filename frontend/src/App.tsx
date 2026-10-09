@@ -6,6 +6,7 @@ import { useTrips } from './hooks/useTrips'
 import { AuthPage } from './pages/AuthPage'
 import { CoordinatorDashboard, TravelerDashboard } from './pages/Dashboards'
 import { TripEditor } from './pages/TripEditor'
+import { CreateTripPage } from './pages/CreateTripPage'
 import { TripWorkspace } from './pages/TripWorkspace'
 import { api } from './services/api'
 import type { Trip, TripDraft } from './types'
@@ -21,7 +22,8 @@ export default function App() {
   const [saveError, setSaveError] = useState('')
   const [notice, setNotice] = useState('')
   function openTrip(id: number) { setSelectedId(id); setView('trips') }
-  function openEditor(trip: Trip | null = null) { setEditing(trip); setSaveError(''); setEditorOpen(true) }
+  function openEditor(trip: Trip) { setEditing(trip); setSaveError(''); setEditorOpen(true) }
+  function openCreate() { setSaveError(''); setView('create') }
   async function saveTrip(draft: TripDraft, id?: number) {
     setSaving(true); setSaveError('')
     try {
@@ -32,5 +34,5 @@ export default function App() {
   }
   if (checking) return <div className="boot-screen" role="status">Loading TripShield…</div>
   if (!session) return <AuthPage onAuthenticate={authenticate} expired={expired}/>
-  return <AppShell session={session} view={view} setView={setView} onLogout={() => void logout()} onNewTrip={() => openEditor()}>{notice && <div className="alert alert--success" role="status">{notice}</div>}{loadError && <div className="alert alert--error" role="alert">{loadError} <button onClick={() => void refresh().catch(() => {})}>Retry</button></div>}{loading && <div className="loading-bar" role="status">Loading trips…</div>}{view === 'overview' ? session.role === 'COORDINATOR' ? <CoordinatorDashboard trips={trips} onOpen={openTrip} onTrips={() => setView('trips')} onNewTrip={() => openEditor()}/> : <TravelerDashboard trips={trips} onOpen={openTrip} onTrips={() => setView('trips')}/> : <TripWorkspace session={session} trips={trips} selectedId={selectedId} onSelect={setSelectedId} onRefresh={async () => { await refresh() }} onEdit={openEditor}/ >}{editorOpen && <TripEditor trip={editing} onClose={() => setEditorOpen(false)} onSave={saveTrip} busy={saving} error={saveError}/>}</AppShell>
+  return <AppShell session={session} view={view} setView={setView} onLogout={() => void logout()} onNewTrip={openCreate}>{notice && <div className="alert alert--success" role="status">{notice}</div>}{loadError && <div className="alert alert--error" role="alert">{loadError} <button onClick={() => void refresh().catch(() => {})}>Retry</button></div>}{loading && <div className="loading-bar" role="status">Loading trips…</div>}{view === 'create' ? <CreateTripPage onCancel={() => setView('trips')} onSave={saveTrip} busy={saving} error={saveError}/> : view === 'overview' ? session.role === 'COORDINATOR' ? <CoordinatorDashboard trips={trips} onOpen={openTrip} onTrips={() => setView('trips')} onNewTrip={openCreate}/> : <TravelerDashboard trips={trips} onOpen={openTrip} onTrips={() => setView('trips')}/> : <TripWorkspace session={session} trips={trips} selectedId={selectedId} onSelect={setSelectedId} onRefresh={async () => { await refresh() }} onEdit={openEditor}/ >}{editorOpen && <TripEditor trip={editing} onClose={() => setEditorOpen(false)} onSave={saveTrip} busy={saving} error={saveError}/>}</AppShell>
 }

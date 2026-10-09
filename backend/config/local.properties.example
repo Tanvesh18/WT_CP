@@ -14,3 +14,6 @@ tripshield.coordinator.password=change-this-password
 # spring.mail.port=587
 # spring.mail.username=sender@example.com
 # spring.mail.password=your-app-password
+
+# Optional Duffel flight search. Create a test token in Duffel first. Keep this file private.
+# tripshield.duffel.token=
