@@ -17,10 +17,14 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import com.tripshield.backend.service.EmailAlerts;
+import com.tripshield.backend.service.DisruptionPlanner;
+import com.tripshield.backend.service.DisruptionPlanner.SegmentImpact;
+import com.tripshield.backend.service.DisruptionPlanner.OptionView;
+import java.util.Set;
+import java.util.stream.Collectors;
 import com.tripshield.backend.security.Access;
 
 @RestController
@@ -32,9 +36,10 @@ public class TripController {
     private final TripEventRepository events;
     private final EmailAlerts emailAlerts;
     private final Access access;
+    private final DisruptionPlanner planner;
 
-    public TripController(TripRepository trips, AlternativeRepository alternatives, TripEventRepository events, EmailAlerts emailAlerts, Access access) {
-        this.trips = trips; this.alternatives = alternatives; this.events = events; this.emailAlerts = emailAlerts; this.access = access;
+    public TripController(TripRepository trips, AlternativeRepository alternatives, TripEventRepository events, EmailAlerts emailAlerts, Access access, DisruptionPlanner planner) {
+        this.trips = trips; this.alternatives = alternatives; this.events = events; this.emailAlerts = emailAlerts; this.access = access; this.planner = planner;
     }
 
     public record ItemInput(@NotBlank String kind, @NotBlank String title, @NotBlank String location,
@@ -52,7 +57,7 @@ public class TripController {
                            List<ItemView> items) {}
     public record DisruptionInput(@NotBlank String type, @NotNull Long itemId) {}
     public record CheckInInput(@NotBlank String status, String note) {}
-    public record ImpactView(String message, ItemView affectedItem, List<Alternative> alternatives) {}
+    public record ImpactView(String message, ItemView affectedItem, List<SegmentImpact> impactedSegments, List<OptionView> alternatives) {}
 
     @GetMapping
     public List<TripView> list() { return trips.findAll().stream().filter(access::canView).map(this::view).toList(); }
@@ -133,6 +138,7 @@ public class TripController {
     @PostMapping("/{id}/disruptions")
     public ImpactView disrupt(@PathVariable Long id, @Valid @RequestBody DisruptionInput input) {
         access.coordinator(); Trip trip = find(id);
+        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Cancelled trips cannot be disrupted");
         TripItem item = item(trip, input.itemId());
         String type = input.type().toUpperCase();
         String expected = switch (type) {
@@ -144,72 +150,101 @@ public class TripController {
         };
         if (!expected.equals(item.kind)) throw badRequest("Disruption does not affect this item");
         if (!"CONFIRMED".equals(item.status)) throw badRequest("Only confirmed items can be disrupted");
-        item.status = "AFFECTED"; item.changeNote = type.replace('_', ' ');
+        List<SegmentImpact> impacted = planner.assessDisruption(trip, item, type);
+        item.status = "AFFECTED"; item.changeNote = type.replace('_', ' '); item.disruptionType = type;
+        for (SegmentImpact consequence : impacted) {
+            TripItem dependent = item(trip, consequence.id());
+            if ("CONFIRMED".equals(dependent.status)) {
+                dependent.status = "AT_RISK";
+                dependent.riskSourceItemId = item.id;
+                dependent.changeNote = "Connection may be missed after " + item.title;
+            }
+        }
         trips.save(trip);
-        events.save(new TripEvent(trip.id, item.id, "DISRUPTION", item.changeNote + " affected " + item.title));
+        events.save(new TripEvent(trip.id, item.id, "DISRUPTION",
+                item.changeNote + " affected " + item.title + "; " + impacted.size() + " later segment(s) at risk"));
         return impact(trip, item);
     }
 
     @GetMapping("/{id}/items/{itemId}/alternatives")
     public ImpactView options(@PathVariable Long id, @PathVariable Long itemId) {
         Trip trip = find(id); TripItem item = item(trip, itemId);
-        if (!"AFFECTED".equals(item.status)) throw badRequest("Simulate a disruption first");
+        if (!List.of("AFFECTED", "AT_RISK").contains(item.status)) throw badRequest("This segment does not need recovery");
         return impact(trip, item);
     }
 
     @PostMapping("/{id}/items/{itemId}/alternatives/{alternativeId}/apply")
     public TripView apply(@PathVariable Long id, @PathVariable Long itemId, @PathVariable Long alternativeId) {
-        access.coordinator(); Trip trip = find(id); if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Trip is cancelled"); TripItem affected = item(trip, itemId);
-        if (!"AFFECTED".equals(affected.status)) throw badRequest("Item is not affected");
+        access.coordinator(); Trip trip = find(id);
+        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Trip is cancelled");
+        TripItem affected = item(trip, itemId);
+        if (!List.of("AFFECTED", "AT_RISK").contains(affected.status)) throw badRequest("Item does not need recovery");
         Alternative option = alternatives.findById(alternativeId).orElseThrow(() -> notFound("Alternative not found"));
         if (!trip.id.equals(option.tripId) || !affected.id.equals(option.itemId)) throw badRequest("Alternative does not belong to this item");
-        if (!fits(trip, affected, option)) throw badRequest("Alternative no longer fits this itinerary");
+        if (!planner.fits(trip, affected, option)) throw badRequest("Alternative no longer fits this itinerary");
+        List<SegmentImpact> remainingRisk = planner.assessOption(trip, affected, option);
+        Set<Long> atRiskIds = remainingRisk.stream().map(SegmentImpact::id).collect(Collectors.toSet());
+        for (TripItem dependent : trip.items) {
+            if ("AT_RISK".equals(dependent.status) && affected.id.equals(dependent.riskSourceItemId)
+                    && !atRiskIds.contains(dependent.id)) {
+                dependent.status = "CONFIRMED"; dependent.changeNote = null; dependent.riskSourceItemId = null;
+                events.save(new TripEvent(trip.id, dependent.id, "CONNECTION_CLEARED", dependent.title + " is back on track"));
+            }
+        }
+        for (SegmentImpact consequence : remainingRisk) {
+            TripItem dependent = item(trip, consequence.id());
+            if ("CONFIRMED".equals(dependent.status)) {
+                dependent.status = "AT_RISK"; dependent.riskSourceItemId = affected.id;
+            }
+            if ("AT_RISK".equals(dependent.status) && affected.id.equals(dependent.riskSourceItemId))
+                dependent.changeNote = consequence.reason();
+        }
         TripItem replacement = new TripItem(); replacement.trip = trip; replacement.kind = affected.kind;
         replacement.title = option.title; replacement.location = option.location;
         replacement.startsAt = option.startsAt; replacement.endsAt = option.endsAt;
+        replacement.replacesItemId = affected.id;
         replacement.changeNote = "Replaced " + affected.title + " after " + affected.changeNote;
         affected.status = "REPLACED";
         trip.items.add(replacement);
         Trip saved = trips.saveAndFlush(trip);
-        events.save(new TripEvent(saved.id, affected.id, "ALTERNATIVE_APPLIED", option.title + " replaced " + affected.title));
+        events.save(new TripEvent(saved.id, affected.id, "ALTERNATIVE_APPLIED",
+                option.title + " replaced " + affected.title + "; " + remainingRisk.size() + " later segment(s) still need attention"));
         return view(saved);
     }
 
     private ImpactView impact(Trip trip, TripItem item) {
         List<Alternative> options = alternatives.findByTripIdAndItemId(trip.id, item.id);
-        if (options.isEmpty()) options = alternatives.saveAll(generate(trip, item));
-        List<Alternative> valid = options.stream().filter(option -> fits(trip, item, option))
-                .sorted(Comparator.comparing((Alternative option) -> option.startsAt).thenComparing(option -> option.estimatedCost)).toList();
-        return new ImpactView(item.changeNote + " affects " + item.title, itemView(item), valid);
+        if (options.stream().noneMatch(option -> planner.fits(trip, item, option))) {
+            String type = item.disruptionType == null ? "CONNECTION_RISK" : item.disruptionType;
+            List<Alternative> existing = options;
+            List<Alternative> fresh = planner.generate(trip, item, type).stream()
+                    .filter(candidate -> existing.stream().noneMatch(saved -> saved.title.equals(candidate.title)
+                            && saved.startsAt.equals(candidate.startsAt) && saved.endsAt.equals(candidate.endsAt)))
+                    .toList();
+            if (!fresh.isEmpty()) {
+                options = new java.util.ArrayList<>(existing);
+                options.addAll(alternatives.saveAll(fresh));
+            }
+        }
+        List<OptionView> valid = options.stream().filter(option -> planner.fits(trip, item, option))
+                .map(option -> planner.describe(trip, item, option))
+                .sorted(Comparator.comparingInt((OptionView option) -> option.impactedSegments().size())
+                        .thenComparingInt(OptionView::delayMinutes)
+                        .thenComparing(OptionView::estimatedCost))
+                .toList();
+        List<SegmentImpact> impacted = "AFFECTED".equals(item.status)
+                ? planner.assessDisruption(trip, item, item.disruptionType == null ? defaultType(item.kind) : item.disruptionType)
+                : List.of();
+        String message = item.changeNote + " affects " + item.title;
+        return new ImpactView(message, itemView(item), impacted, valid);
     }
 
-    private List<Alternative> generate(Trip trip, TripItem item) {
-        String place = item.kind.equals("FLIGHT") ? trip.origin + " → " + trip.destination : item.location;
-        String label = switch (item.kind) {
-            case "FLIGHT" -> "flight";
-            case "HOTEL" -> "hotel";
-            default -> "transfer";
+    private String defaultType(String kind) {
+        return switch (kind) {
+            case "FLIGHT" -> "FLIGHT_CANCELLATION";
+            case "HOTEL" -> "HOTEL_UNAVAILABLE";
+            default -> "TRANSPORT_DISRUPTION";
         };
-        int firstDelay = item.kind.equals("HOTEL") ? 0 : 60;
-        int secondDelay = item.kind.equals("HOTEL") ? 0 : 180;
-        Alternative first = new Alternative(trip.id, item.id, item.kind, "Alternative " + label + " A", place,
-                        item.startsAt.plusMinutes(firstDelay), item.endsAt.plusMinutes(firstDelay),
-                        item.kind.equals("HOTEL") ? "6200" : "8500", "Sample replacement for " + place);
-        Alternative second = new Alternative(trip.id, item.id, item.kind, "Alternative " + label + " B", place,
-                        item.startsAt.plusMinutes(secondDelay), item.endsAt.plusMinutes(secondDelay),
-                        item.kind.equals("HOTEL") ? "4800" : "11200", "Second sample option for " + place);
-        first.delayMinutes = (int) Duration.between(item.startsAt, first.startsAt).toMinutes();
-        second.delayMinutes = (int) Duration.between(item.startsAt, second.startsAt).toMinutes();
-        return List.of(first, second);
-    }
-
-    private boolean fits(Trip trip, TripItem affected, Alternative option) {
-        if (!affected.kind.equals(option.kind) || option.startsAt == null || option.endsAt == null) return false;
-        if (!option.endsAt.isAfter(option.startsAt) || option.startsAt.toLocalDate().isBefore(trip.startDate)
-                || option.endsAt.toLocalDate().isAfter(trip.endDate)) return false;
-        return trip.items.stream().filter(other -> !other.id.equals(affected.id) && "CONFIRMED".equals(other.status)
-                        && other.kind.equals(affected.kind))
-                .noneMatch(other -> option.startsAt.isBefore(other.endsAt) && other.startsAt.isBefore(option.endsAt));
     }
 
     private Trip find(Long id) { Trip trip = trips.findById(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
@@ -224,10 +259,13 @@ public class TripController {
     private TripView view(Trip trip) {
         List<ItemView> items = trip.items.stream().sorted(Comparator.comparing(i -> i.startsAt)).map(this::itemView).toList();
         long affected = items.stream().filter(i -> "AFFECTED".equals(i.status())).count();
+        long atRisk = items.stream().filter(i -> "AT_RISK".equals(i.status())).count();
         boolean needsHelp = "NEEDS_HELP".equals(trip.checkInStatus);
-        String status = "CANCELLED".equals(trip.lifecycle) ? "CANCELLED" : affected > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
-        String risk = needsHelp || affected > 1 ? "HIGH" : affected == 1 ? "MEDIUM" : "LOW";
-        String reason = needsHelp ? "Traveler requested help" : affected > 1 ? "Multiple unresolved disruptions"
+        String status = "CANCELLED".equals(trip.lifecycle) ? "CANCELLED" : affected > 0 || atRisk > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
+        String risk = needsHelp || affected + atRisk > 1 ? "HIGH" : affected + atRisk == 1 ? "MEDIUM" : "LOW";
+        String reason = needsHelp ? "Traveler requested help" : atRisk > 0
+                ? affected + " disrupted and " + atRisk + " connected segment(s) at risk"
+                : affected > 1 ? "Multiple unresolved disruptions"
                 : affected == 1 ? "One unresolved disruption" : "No active disruption or help request";
         return new TripView(trip.id, trip.traveler, trip.travelerEmail, trip.origin, trip.destination, trip.startDate,
                 trip.endDate, status, risk, reason, trip.checkInStatus == null ? "PENDING" : trip.checkInStatus,

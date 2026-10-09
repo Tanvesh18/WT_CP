@@ -1,0 +1,11 @@
+export type Role = 'COORDINATOR' | 'TRAVELER'
+export type Session = { token: string; name: string; email: string; role: Role }
+export type Kind = 'FLIGHT' | 'HOTEL' | 'TRANSPORT'
+export type TripItem = { id: number; kind: Kind; title: string; location: string; startsAt: string; endsAt: string; status: 'CONFIRMED' | 'AFFECTED' | 'AT_RISK' | 'REPLACED'; changeNote: string | null }
+export type Trip = { id: number; traveler: string; travelerEmail: string; origin: string; destination: string; startDate: string; endDate: string; status: 'ON_TRACK' | 'NEEDS_ATTENTION' | 'CANCELLED'; riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'; riskReason: string; checkInStatus: string; checkedInAt: string | null; checkInNote: string | null; items: TripItem[] }
+export type TripEvent = { id: number; type: string; details: string; occurredAt: string }
+export type SegmentImpact = { id: number; title: string; kind: Kind; bufferMinutes: number; requiredMinutes: number; reason: string }
+export type Alternative = { id: number; kind: Kind; title: string; location: string; startsAt: string; endsAt: string; delayMinutes: number; estimatedCost: number; description: string; practicality: string; impactedSegments: SegmentImpact[] }
+export type Impact = { message: string; affectedItem: TripItem; impactedSegments: SegmentImpact[]; alternatives: Alternative[] }
+export type ItemDraft = { id?: number; kind: Kind; title: string; location: string; startsAt: string; endsAt: string }
+export type TripDraft = { traveler: string; travelerEmail: string; origin: string; destination: string; startDate: string; endDate: string; items: ItemDraft[] }

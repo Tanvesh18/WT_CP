@@ -16,4 +16,7 @@ public class TripItem {
     public LocalDateTime endsAt;
     public String status = "CONFIRMED";
     public String changeNote;
+    public String disruptionType;
+    public Long riskSourceItemId;
+    public Long replacesItemId;
 }

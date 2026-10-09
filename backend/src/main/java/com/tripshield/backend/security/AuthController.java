@@ -2,6 +2,8 @@ package com.tripshield.backend.security;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import java.nio.charset.StandardCharsets;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -12,14 +14,16 @@ import java.util.Locale;
 public class AuthController {
  private final UserRepository users; private final Access access;
  private final BCryptPasswordEncoder encoder=new BCryptPasswordEncoder();
- @Value("${tripshield.coordinator.email:}") private String coordinatorEmail;
- @Value("${tripshield.coordinator.password:}") private String coordinatorPassword;
+ @Value("${tripshield.coordinator.email:}") private String coordinatorEmail = "";
+ @Value("${tripshield.coordinator.password:}") private String coordinatorPassword = "";
  public AuthController(UserRepository users,Access access){this.users=users;this.access=access;}
  public record Credentials(@NotBlank @Email String email,@NotBlank String password) {}
- public record Registration(@NotBlank String name,@NotBlank @Email String email,@NotBlank String password) {}
+ public record Registration(@NotBlank @Size(max=100) String name,@NotBlank @Email @Size(max=254) String email,@NotBlank String password) {}
  public record Session(String token,String name,String email,String role) {}
  @PostMapping("/register") public Session register(@Valid @RequestBody Registration input){
-  if(input.password().length()<8) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Password needs at least 8 characters");
+  if(input.name().trim().isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Name is required");
+  int passwordBytes=input.password().getBytes(StandardCharsets.UTF_8).length;
+  if(passwordBytes<8 || passwordBytes>72) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Password must be 8 to 72 bytes");
   String email=input.email().trim().toLowerCase(Locale.ROOT);
   if(email.equalsIgnoreCase(coordinatorEmail) || users.findByEmailIgnoreCase(email).isPresent()) throw new ResponseStatusException(HttpStatus.CONFLICT,"Email already registered");
   AppUser user=new AppUser(); user.name=input.name().trim(); user.email=email; user.passwordHash=encoder.encode(input.password()); user.role="TRAVELER";

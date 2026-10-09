@@ -13,18 +13,20 @@ The frontend sends requests to the backend under `/api`. Vite forwards those req
 ## Implemented features
 
 - Create a trip with a traveler, origin, destination, dates, and flight, hotel, or transport items.
-- View all trips and the selected trip's itinerary in time order.
-- Highlight trips with an affected itinerary item in the coordinator-style trip list.
+- Search trips and filter by status, risk, and overlapping date range; sort by date or risk.
+- View each trip's itinerary as a day-grouped timeline with segment state and activity history.
+- Highlight trips with a disrupted or at-risk itinerary segment in the coordinator workspace.
 - Simulate a flight cancellation, hotel unavailability, transport issue, or severe weather on an itinerary item.
-- See which item is affected and compare sample alternatives by delay and estimated cost.
+- Automatically flag nearby connected segments when a simulated disruption leaves insufficient transfer time.
+- Compare simulated alternatives by estimated cost, departure timing, and remaining connection risks.
 - Choose an alternative to add a replacement item, mark the old item as replaced, and see an on-screen update message.
-- Generate sample alternatives for the affected trip item, using its route or location and times. Options outside the trip dates or overlapping another confirmed item of the same type are hidden.
+- Generate context-based sample flights, stays, and transfers. Dependent replacement segments cannot depart before the upstream travel arrives. Options outside trip dates or conflicting with another booking of the same type are hidden.
 - View a persistent activity history for trip creation, disruptions, alternative selections, and check-ins.
-- See a simple low, medium, or high risk level based on unresolved disruptions and help requests.
+- See a simple low, medium, or high risk level based on unresolved disruptions, at-risk connections, and help requests.
 - Record a traveler check-in as **Safe** or **Needs help**, with an optional note.
-- Switch between the itinerary timeline and a schematic route map for supported Indian cities.
+- Switch between the itinerary timeline and a schematic route map for supported Indian cities. Unmapped locations remain visible in the stop list.
 
-Alternatives are saved for each affected itinerary item. They are demonstration options built from that item's details; they do not represent available bookings or live prices.
+Alternatives are saved for each affected itinerary item. They are demonstration options built from that item's details; they do not represent available bookings or live prices. The connection rules use a 12-hour look-ahead and fixed minimum buffers (45–120 minutes depending on segment type). They are planning heuristics, not airline, hotel, or safety guarantees.
 
 ## Run locally
 
@@ -74,16 +76,16 @@ tripshield.coordinator.email=coordinator@example.com
 tripshield.coordinator.password=choose-a-strong-password
 ```
 
-Sign in as coordinator to create, edit, search, filter, and cancel trips. Existing trips remain in MySQL. Edit each existing trip once to add the traveler's email address. A traveler can register from the sign-in screen using that same email address and then view their assigned trips and submit a check-in. Account sessions last until backend restart or sign-out.
+Sign in as coordinator to create, edit, search, filter, and cancel trips. Existing trips remain in MySQL. Edit each existing trip once to add the traveler's email address. A traveler can select **Create traveler account** on the sign-in screen, enter their name, email, password, and password confirmation, and register with the same email address assigned to their trips. The account is saved in MySQL in the `app_user` table with a bcrypt password hash, not the original password. They can then view their assigned trips and submit a check-in. Sessions are stored in MySQL as token hashes and expire after 12 hours or sign-out. A backend restart no longer signs users out.
 
-The dashboard shows status, destination, and disruption counts. Cancellation keeps a trip and its history for review. To send a real email when a traveler requests help, configure `tripshield.alert.to` and the `spring.mail.*` SMTP properties shown in `backend/config/local.properties.example`. Without SMTP settings, check-ins still work and are saved, but no email is sent.
+The coordinator dashboard highlights active trips, upcoming journeys, disruptions, and help requests. The traveler dashboard shows assigned journeys, updates, and an entry point to itinerary and check-in. Cancellation keeps a trip and its history for review. To send a real email when a traveler requests help, configure `tripshield.alert.to` and the `spring.mail.*` SMTP properties shown in `backend/config/local.properties.example`. Without SMTP settings, check-ins still work and are saved, but no email is sent.
 
 ## Try the demo
 
 1. Create a trip and add at least one itinerary item. Item start and end times must fall within the trip dates.
-2. Select the trip from the left-hand list.
+2. Open **Trips** and select the trip from the list.
 3. Simulate a disruption on a confirmed item. The trip is marked **Needs attention**.
-4. Review the suggested alternatives and select one. The replacement is added to the itinerary and the trip returns to **On track** when no affected items remain.
+4. Review the alternatives by timing, cost, and connection risk, then apply one. If a later segment remains **At risk**, open its recovery options and resolve it too. The trip returns to **On track** when no disrupted or at-risk segments remain.
 5. Try the **Route map** tab, record a traveler check-in, and review the activity history. A **Needs help** check-in keeps the trip marked **Needs attention** until it is changed to **Safe**.
 
 ## API endpoints
@@ -91,13 +93,17 @@ The dashboard shows status, destination, and disruption counts. Cancellation kee
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/health` | Check that the backend is running |
+| POST | `/api/auth/register` | Create a traveler account |
+| POST | `/api/auth/login` | Sign in |
+| POST | `/api/auth/logout` | Sign out |
+| GET | `/api/auth/me` | Validate the current session |
 | GET | `/api/trips` | List trips |
 | POST | `/api/trips` | Create a trip |
 | GET | `/api/trips/{id}` | Get one trip |
 | GET | `/api/trips/{id}/history` | Get the trip's activity history |
 | POST | `/api/trips/{id}/check-in` | Record safe or needs-help status |
 | POST | `/api/trips/{id}/disruptions` | Simulate a disruption on an item |
-| GET | `/api/trips/{id}/items/{itemId}/alternatives` | Get alternatives for an affected item |
+| GET | `/api/trips/{id}/items/{itemId}/alternatives` | Get alternatives for a disrupted or at-risk item |
 | POST | `/api/trips/{id}/items/{itemId}/alternatives/{alternativeId}/apply` | Apply an alternative |
 
 For a check-in, send JSON such as `{ "status": "SAFE", "note": "Reached the hotel" }` or use `"NEEDS_HELP"`. To simulate a disruption, send `{ "type": "FLIGHT_CANCELLATION", "itemId": 1 }`; other types are `HOTEL_UNAVAILABLE`, `TRANSPORT_DISRUPTION`, and `SEVERE_WEATHER`.
@@ -106,7 +112,7 @@ For a check-in, send JSON such as `{ "status": "SAFE", "note": "Reached the hote
 
 This is a prototype using generated sample alternatives and simulated disruptions. The map is a schematic view of supported Indian city coordinates; it is not a live map or location tracker. Live flight/hotel/weather integrations are not implemented. Account login and optional SMTP help-request alerts are available after local configuration. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
 
-The frontend build and lint checks pass. A full backend run needs Java, MySQL, and Maven access to its dependencies.
+Run `npm.cmd run test`, `npm.cmd run build`, and `npm.cmd run lint` from `frontend/` for the frontend checks. A full backend test run needs Maven access to the required Surefire and JUnit artifacts.
 
 ## Package lockfiles
 
