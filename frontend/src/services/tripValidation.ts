@@ -1,8 +1,12 @@
 import type { TripDraft } from '../types'
 
+const today = () => { const date = new Date(); return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-') }
+
 export function validateTripDraft(draft: TripDraft): string | null {
   if (!draft.traveler.trim() || !draft.travelerEmail.trim() || !draft.origin.trim() || !draft.destination.trim()) return 'Complete the traveler and route details.'
-  if (!draft.startDate || !draft.endDate || draft.endDate < draft.startDate) return 'Choose an end date on or after the start date.'
+  if (!draft.startDate || !draft.endDate) return 'Choose departure and trip end dates.'
+  if (draft.startDate < today()) return 'Departure date cannot be before today.'
+  if (draft.endDate < draft.startDate) return 'Trip end date must be on or after departure date.'
   if (!draft.items.length) return 'Add at least one itinerary segment.'
   for (const [index, item] of draft.items.entries()) {
     const label = 'Segment ' + (index + 1)

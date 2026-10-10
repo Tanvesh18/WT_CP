@@ -48,7 +48,7 @@ public class FlightController {
 
     @PostMapping("/search")
     public SearchResult search(@Valid @RequestBody SearchInput input) {
-        access.coordinator();
+        access.current();
         return searchOffers(input.origin(), input.destination(), input.departureDate());
     }
 

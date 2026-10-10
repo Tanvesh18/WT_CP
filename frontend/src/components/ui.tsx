@@ -5,7 +5,7 @@ export function Button({ variant = 'secondary', className = '', ...props }: Butt
   return <button className={'button button--' + variant + ' ' + className} {...props} />
 }
 export function StatusBadge({ status }: { status: Trip['status'] }) {
-  const labels = { ON_TRACK: 'On track', NEEDS_ATTENTION: 'Needs attention', CANCELLED: 'Cancelled' }
+  const labels = { ON_TRACK: 'On track', NEEDS_ATTENTION: 'Needs attention', REQUESTED: 'Awaiting review', CANCELLED: 'Cancelled' }
   return <span className={'status status--' + status.toLowerCase()}>{labels[status]}</span>
 }
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {

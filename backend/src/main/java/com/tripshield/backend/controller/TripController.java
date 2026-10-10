@@ -75,10 +75,14 @@ public class TripController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TripView create(@Valid @RequestBody TripInput input) {
-        if (input.endDate().isBefore(input.startDate())) throw badRequest("End date must be after start date");
-        access.coordinator();
+        if (input.startDate().isBefore(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")))) throw badRequest("Departure date cannot be before today");
+        if (input.endDate().isBefore(input.startDate())) throw badRequest("Trip end date must be on or after departure date");
+        var actor = access.current();
+        boolean travelerRequest = "TRAVELER".equals(actor.role);
+        if (travelerRequest && !actor.email.equalsIgnoreCase(input.travelerEmail().trim())) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can request a trip only for your own account");
         Trip trip = new Trip();
-        trip.traveler = input.traveler().trim(); trip.travelerEmail = input.travelerEmail().trim().toLowerCase(); trip.origin = input.origin().trim();
+        if (travelerRequest) trip.lifecycle = "REQUESTED";
+        trip.traveler = travelerRequest ? actor.name : input.traveler().trim(); trip.travelerEmail = travelerRequest ? actor.email : input.travelerEmail().trim().toLowerCase(); trip.origin = input.origin().trim();
         trip.destination = input.destination().trim(); trip.originAirportCode = code(input.originAirportCode()); trip.destinationAirportCode = code(input.destinationAirportCode()); validateAirportPair(trip); trip.startDate = input.startDate(); trip.endDate = input.endDate();
         for (ItemInput value : input.items()) {
             String kind = value.kind().toUpperCase();
@@ -91,8 +95,17 @@ public class TripController {
             trip.items.add(item);
         }
         Trip saved = trips.saveAndFlush(trip);
-        events.save(new TripEvent(saved.id, null, "TRIP_CREATED", "Trip created for " + saved.traveler));
+        events.save(new TripEvent(saved.id, null, travelerRequest ? "BOOKING_REQUESTED" : "TRIP_CREATED", travelerRequest ? "Booking request submitted by " + saved.traveler : "Trip created for " + saved.traveler));
         return view(saved);
+    }
+
+    @PostMapping("/{id}/approve")
+    public TripView approve(@PathVariable Long id) {
+        access.coordinator(); Trip trip = find(id);
+        if (!"REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not awaiting approval");
+        trip.lifecycle = "ACTIVE";
+        events.save(new TripEvent(id, null, "REQUEST_APPROVED", "Booking request approved as an itinerary plan; no ticket was issued"));
+        return view(trips.save(trip));
     }
 
     @PutMapping("/{id}")
@@ -128,8 +141,8 @@ public class TripController {
 
     @PostMapping("/{id}/check-in")
     public TripView checkIn(@PathVariable Long id, @Valid @RequestBody CheckInInput input) {
-        Trip trip = find(id);
-        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Trip is cancelled");
+        access.coordinator(); Trip trip = find(id);
+        if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active");
         String status = input.status().toUpperCase();
         if (!List.of("SAFE", "NEEDS_HELP").contains(status)) throw badRequest("Status must be SAFE or NEEDS_HELP");
         trip.checkInStatus = status; trip.checkedInAt = LocalDateTime.now();
@@ -143,7 +156,7 @@ public class TripController {
     @PostMapping("/{id}/disruptions")
     public ImpactView disrupt(@PathVariable Long id, @Valid @RequestBody DisruptionInput input) {
         access.coordinator(); Trip trip = find(id);
-        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Cancelled trips cannot be disrupted");
+        if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active");
         TripItem item = item(trip, input.itemId());
         String type = input.type().toUpperCase();
         String expected = switch (type) {
@@ -174,14 +187,14 @@ public class TripController {
 
     @GetMapping("/{id}/items/{itemId}/alternatives")
     public ImpactView options(@PathVariable Long id, @PathVariable Long itemId) {
-        Trip trip = find(id); TripItem item = item(trip, itemId);
+        access.coordinator(); Trip trip = find(id); TripItem item = item(trip, itemId);
         if (!List.of("AFFECTED", "AT_RISK").contains(item.status)) throw badRequest("This segment does not need recovery");
         return impact(trip, item);
     }
 
     @PostMapping("/{id}/items/{itemId}/alternatives/refresh")
     public ImpactView refreshFlightOptions(@PathVariable Long id, @PathVariable Long itemId) {
-        access.coordinator(); Trip trip = find(id); TripItem item = item(trip, itemId);
+        access.coordinator(); Trip trip = find(id); if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active"); TripItem item = item(trip, itemId);
         if (!"AFFECTED".equals(item.status) || !"FLIGHT_CANCELLATION".equals(item.disruptionType) || item.flightSource == null)
             throw badRequest("Duffel replacement search is available for cancelled Duffel flights");
         return impact(trip, item, refreshDuffelAlternatives(trip, item));
@@ -190,7 +203,7 @@ public class TripController {
     @PostMapping("/{id}/items/{itemId}/alternatives/{alternativeId}/apply")
     public TripView apply(@PathVariable Long id, @PathVariable Long itemId, @PathVariable Long alternativeId) {
         access.coordinator(); Trip trip = find(id);
-        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Trip is cancelled");
+        if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active");
         TripItem affected = item(trip, itemId);
         if (!List.of("AFFECTED", "AT_RISK").contains(affected.status)) throw badRequest("Item does not need recovery");
         Alternative option = alternatives.findById(alternativeId).orElseThrow(() -> notFound("Alternative not found"));
@@ -404,7 +417,7 @@ public class TripController {
         long affected = items.stream().filter(i -> "AFFECTED".equals(i.status())).count();
         long atRisk = items.stream().filter(i -> "AT_RISK".equals(i.status())).count();
         boolean needsHelp = "NEEDS_HELP".equals(trip.checkInStatus);
-        String status = "CANCELLED".equals(trip.lifecycle) ? "CANCELLED" : affected > 0 || atRisk > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
+        String status = "CANCELLED".equals(trip.lifecycle) ? "CANCELLED" : "REQUESTED".equals(trip.lifecycle) ? "REQUESTED" : affected > 0 || atRisk > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
         String risk = needsHelp || affected + atRisk > 1 ? "HIGH" : affected + atRisk == 1 ? "MEDIUM" : "LOW";
         String reason = needsHelp ? "Traveler requested help" : atRisk > 0
                 ? affected + " disrupted and " + atRisk + " connected segment(s) at risk"

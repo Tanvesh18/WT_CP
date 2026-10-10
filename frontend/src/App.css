@@ -79,3 +79,5 @@
 
 .selected-flight-preview{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,1fr);gap:20px;margin:26px 0;padding-top:24px;border-top:1px solid var(--line)}.selected-flight-preview h3{font-size:17px;margin:5px 0}.selected-flight-preview .route-map{align-self:start}
 @media(max-width:1050px){.selected-flight-preview{grid-template-columns:1fr}}
+
+.status--requested{background:#e8f1fb;color:#315f91}

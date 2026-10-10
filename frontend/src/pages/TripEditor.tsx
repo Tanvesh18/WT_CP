@@ -4,6 +4,7 @@ import { Button, Modal } from '../components/ui'
 import { validateTripDraft } from '../services/tripValidation'
 import { FlightSearch, type FlightOffer } from '../components/FlightSearch'
 
+const localToday = () => { const date = new Date(); return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-') }
 const blankItem = (): ItemDraft => ({ kind: 'FLIGHT', title: '', location: '', startsAt: '', endsAt: '' })
 const blankTrip = (): TripDraft => ({ traveler: '', travelerEmail: '', origin: '', destination: '', startDate: '', endDate: '', items: [blankItem()] })
 function initialDraft(trip: Trip | null): TripDraft {
@@ -37,8 +38,8 @@ export function TripEditor({ trip, onClose, onSave, busy, error }: { trip: Trip 
         <label>Traveler email<input type="email" required autoComplete="email" value={draft.travelerEmail} onChange={e => field('travelerEmail', e.target.value)} /></label>
         <label>Origin<input required disabled={Boolean(trip?.originAirportCode && trip.items.some(item => item.flightSource))} value={draft.origin} onChange={e => field('origin', e.target.value)} /></label>
         <label>Destination<input required disabled={Boolean(trip?.destinationAirportCode && trip.items.some(item => item.flightSource))} value={draft.destination} onChange={e => field('destination', e.target.value)} /></label>
-        <label>Start date<input type="date" required value={draft.startDate} onChange={e => field('startDate', e.target.value)} /></label>
-        <label>End date<input type="date" required min={draft.startDate} value={draft.endDate} onChange={e => field('endDate', e.target.value)} /></label>
+        <label>Start date<input type="date" required min={localToday()} value={draft.startDate} onChange={e => field('startDate', e.target.value)} /></label>
+        <label>End date<input type="date" required min={draft.startDate && draft.startDate > localToday() ? draft.startDate : localToday()} value={draft.endDate} onChange={e => field('endDate', e.target.value)} /></label>
       </div>
       <div className="section-head editor__items-head"><div><span className="eyebrow">TRAVEL PLAN</span><h3>Itinerary segments</h3></div><Button type="button" onClick={() => setDraft(current => ({ ...current, items: [...current.items, blankItem()] }))}>＋ Add segment</Button></div>
       <p className="form-help">Segments must fall within the trip dates. You can add more than one flight, stay, or transfer.</p>
