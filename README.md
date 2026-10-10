@@ -24,7 +24,7 @@ The frontend sends requests to the backend under `/api`. Vite forwards those req
 - View a persistent activity history for trip creation, disruptions, alternative selections, and check-ins.
 - See a simple low, medium, or high risk level based on unresolved disruptions, at-risk connections, and help requests.
 - Record a traveler check-in as **Safe** or **Needs help**, with an optional note.
-- Switch between the itinerary timeline and a schematic route map for supported Indian cities. Unmapped locations remain visible in the stop list.
+- View a geographic airport route map beside the itinerary timeline for flights with known airport codes.
 
 Alternatives are saved for each affected itinerary item. They are demonstration options built from that item's details; they do not represent available bookings or live prices. The connection rules use a 12-hour look-ahead and fixed minimum buffers (45–120 minutes depending on segment type). They are planning heuristics, not airline, hotel, or safety guarantees.
 
@@ -110,7 +110,7 @@ For a check-in, send JSON such as `{ "status": "SAFE", "note": "Reached the hote
 
 ## Current scope
 
-This is a prototype using generated sample alternatives and simulated disruptions. The map is a schematic view of supported Indian city coordinates; it is not a live map or location tracker. Live flight/hotel/weather integrations are not implemented. Account login and optional SMTP help-request alerts are available after local configuration. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
+This is a prototype using generated sample alternatives and simulated disruptions. The route map connects airport positions and is not a live aircraft tracker. Live flight/hotel/weather integrations are not implemented. Account login and optional SMTP help-request alerts are available after local configuration. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
 
 Run `npm.cmd run test`, `npm.cmd run build`, and `npm.cmd run lint` from `frontend/` for the frontend checks. A full backend test run needs Maven access to the required Surefire and JUnit artifacts.
 
@@ -130,6 +130,6 @@ Coordinators use **New trip** to open the full-page planner: choose airports and
 
 ## Flight route map and disruption recovery
 
-Selected Duffel offers now save their airport coordinates and flight legs. The trip workspace places a geographic route map beside the itinerary timeline, and the flight-selection step previews the same route immediately. The map uses OpenStreetMap tiles with visible attribution; the overlay plots airport coordinates from Duffel. Its connecting lines are geographic guides, not tracked aircraft paths. Older flights without saved coordinates show a clear fallback. Browser access to the tile server is needed for the basemap.
+Selected Duffel offers save their airport codes and flight legs. The trip workspace places a geographic route map beside the itinerary timeline, and flight selection previews it. The map is rendered with Leaflet over OpenStreetMap tiles. Airport positions use a bundled public-domain OurAirports snapshot (scheduled-service IATA airports, downloaded 10 October 2026), falling back to Duffel coordinates for unlisted airports. The map validates offer endpoints against the selected route and falls back to the direct airport pair when they disagree. Connecting lines are geographic guides, not tracked aircraft paths. Browser access to the tile server is needed for the basemap. Coordinate source: https://ourairports.com/data/.
 
 For a simulated cancellation of a Duffel flight, TripShield searches Duffel again for the flight route and departure date. Replacement offers show arrival delay, fare difference when currencies match, and downstream itinerary risks. Refreshing starts a new search and makes older offers inapplicable. The backend verifies an offer again before adding it as an itinerary replacement. This does **not** book, pay for, or change an airline ticket. Duffel test-token results remain simulated. Recovery options for hotel, ground transport, and other prototype disruptions remain simulated and are labeled accordingly.

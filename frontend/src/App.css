@@ -81,3 +81,5 @@
 @media(max-width:1050px){.selected-flight-preview{grid-template-columns:1fr}}
 
 .status--requested{background:#e8f1fb;color:#315f91}
+
+.geo-map{height:360px;min-height:360px}

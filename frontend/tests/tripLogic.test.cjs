@@ -8,7 +8,7 @@ function load(source) {
   const code = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', source), 'utf8')
   const js = ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const module = { exports: {} }
-  vm.runInNewContext(js, { exports: module.exports, module }, { filename: source })
+  vm.runInNewContext(js, { exports: module.exports, module, require: id => id === './airportCoordinates.json' ? require(path.join(__dirname, '..', 'src', 'services', 'airportCoordinates.json')) : require(id) }, { filename: source })
   return module.exports
 }
 const { validateTripDraft } = load('tripValidation.ts')
@@ -68,4 +68,19 @@ test('flight map keeps actual connecting and technical airport coordinates', () 
   ]
   assert.deepEqual(Array.from(routePoints(JSON.stringify(legs)), point => point.code), ['PNQ', 'BOM', 'JAI', 'DEL'])
   assert.equal(routePoints('invalid').length, 0)
+})
+
+test('flight map pins PNQ and DEL to reference coordinates and ignores bad offer coordinates', () => {
+  const legs = [{ origin: 'PNQ', originLatitude: 0, originLongitude: 0, destination: 'DEL', destinationLatitude: 64, destinationLongitude: -141 }]
+  const points = routePoints(JSON.stringify(legs), 'PNQ → DEL')
+  assert.deepEqual(Array.from(points, point => point.code), ['PNQ', 'DEL'])
+  assert.ok(Math.abs(points[0].lat - 18.5821) < 0.001)
+  assert.ok(Math.abs(points[0].lon - 73.919701) < 0.001)
+  assert.ok(Math.abs(points[1].lat - 28.55563) < 0.001)
+  assert.ok(Math.abs(points[1].lon - 77.09519) < 0.001)
+})
+test('flight map falls back to selected route when offer legs disagree', () => {
+  const legs = [{ origin: 'BOM', destination: 'JAI' }]
+  assert.deepEqual(Array.from(routePoints(JSON.stringify(legs), 'PNQ → DEL'), point => point.code), ['PNQ', 'DEL'])
+  assert.deepEqual(Array.from(routePoints(null, 'PNQ → DEL'), point => point.code), ['PNQ', 'DEL'])
 })
