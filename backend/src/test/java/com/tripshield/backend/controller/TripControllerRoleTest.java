@@ -4,6 +4,10 @@ import com.tripshield.backend.model.Trip;
 import com.tripshield.backend.repository.AlternativeRepository;
 import com.tripshield.backend.repository.TripEventRepository;
 import com.tripshield.backend.repository.TripRepository;
+import com.tripshield.backend.repository.TripCreateKeyRepository;
+import com.tripshield.backend.security.UserRepository;
+import com.tripshield.backend.service.TravelerNotifications;
+import tools.jackson.databind.ObjectMapper;
 import com.tripshield.backend.security.Access;
 import com.tripshield.backend.security.AppUser;
 import com.tripshield.backend.service.DisruptionPlanner;
@@ -26,7 +30,10 @@ class TripControllerRoleTest {
     private final Access access = mock(Access.class);
     private final DisruptionPlanner planner = mock(DisruptionPlanner.class);
     private final FlightController flights = mock(FlightController.class);
-    private final TripController controller = new TripController(trips, alternatives, events, email, access, planner, flights);
+    private final TripCreateKeyRepository keys = mock(TripCreateKeyRepository.class);
+    private final UserRepository users = mock(UserRepository.class);
+    private final TravelerNotifications notifications = mock(TravelerNotifications.class);
+    private final TripController controller = new TripController(trips, alternatives, events, email, access, planner, flights, keys, users, notifications, new ObjectMapper());
 
     private TripController.TripInput input(String email) {
         LocalDate day = LocalDate.now().plusDays(3);
@@ -35,18 +42,20 @@ class TripControllerRoleTest {
     }
 
     @Test void travelerCanRequestOnlyForOwnEmail() {
-        AppUser traveler = new AppUser(); traveler.role = "TRAVELER"; traveler.email = "asha@example.com"; traveler.name = "Asha";
+        AppUser traveler = new AppUser(); traveler.id = 1L; traveler.role = "TRAVELER"; traveler.email = "asha@example.com"; traveler.name = "Asha";
         when(access.current()).thenReturn(traveler);
-        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create(input("other@example.com")));
+        when(users.findWithLockById(1L)).thenReturn(java.util.Optional.of(traveler));
+        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create("other", input("other@example.com")));
         assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
         verifyNoInteractions(trips);
     }
 
     @Test void travelerRequestIsSavedPendingReview() {
-        AppUser traveler = new AppUser(); traveler.role = "TRAVELER"; traveler.email = "asha@example.com"; traveler.name = "Asha";
+        AppUser traveler = new AppUser(); traveler.id = 1L; traveler.role = "TRAVELER"; traveler.email = "asha@example.com"; traveler.name = "Asha";
         when(access.current()).thenReturn(traveler);
+        when(users.findWithLockById(1L)).thenReturn(java.util.Optional.of(traveler));
         when(trips.saveAndFlush(any(Trip.class))).thenAnswer(call -> call.getArgument(0));
-        var result = controller.create(input("asha@example.com"));
+        var result = controller.create("request", input("asha@example.com"));
         assertEquals("REQUESTED", result.status());
         assertEquals("Asha", result.traveler());
         assertEquals("asha@example.com", result.travelerEmail());
@@ -57,18 +66,21 @@ class TripControllerRoleTest {
         var input = new TripController.TripInput("Asha", "asha@example.com", "Pune", "Delhi", null, null,
                 yesterday, yesterday.plusDays(1), List.of(new TripController.ItemInput("HOTEL", "Stay", "Delhi",
                 yesterday.atTime(8, 0), yesterday.atTime(10, 0), null, null, null, null, null)));
-        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create(input));
+        AppUser traveler = new AppUser(); traveler.id = 1L; traveler.role = "TRAVELER"; traveler.email = "asha@example.com";
+        when(access.current()).thenReturn(traveler); when(users.findWithLockById(1L)).thenReturn(java.util.Optional.of(traveler));
+        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create("past", input));
         assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
         verifyNoInteractions(trips);
     }
     @Test void manualFlightIsRejected() {
-        AppUser coordinator = new AppUser(); coordinator.role = "COORDINATOR"; coordinator.email = "coordinator@example.com";
+        AppUser coordinator = new AppUser(); coordinator.id = 2L; coordinator.role = "COORDINATOR"; coordinator.email = "coordinator@example.com";
         when(access.current()).thenReturn(coordinator);
+        when(users.findWithLockById(2L)).thenReturn(java.util.Optional.of(coordinator));
         LocalDate day = LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).plusDays(3);
         var input = new TripController.TripInput("Asha", "asha@example.com", "Pune", "Delhi", null, null,
                 day, day.plusDays(1), List.of(new TripController.ItemInput("FLIGHT", "Typed flight", "Pune Airport",
                 day.atTime(8, 0), day.atTime(10, 0), null, null, null, null, null)));
-        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create(input));
+        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create("manual", input));
         assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
         verifyNoInteractions(trips);
     }

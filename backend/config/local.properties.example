@@ -1,5 +1,5 @@
 # Copy this file to local.properties and fill in your MySQL password once.
-# Spring Boot loads local.properties automatically when started from backend/.
+# Spring Boot loads local.properties only with the explicit local profile from backend/.
 spring.datasource.url=jdbc:mysql://localhost:3306/tripshield
 spring.datasource.username=root
 spring.datasource.password=

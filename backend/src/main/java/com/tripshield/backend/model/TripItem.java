@@ -2,6 +2,7 @@ package com.tripshield.backend.model;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Entity
 public class TripItem {
@@ -10,6 +11,8 @@ public class TripItem {
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "trip_id", nullable = false)
     public Trip trip;
     public String kind;
+    public BigDecimal estimatedCost;
+    public String costCurrency;
     public String title;
     public String location;
     public LocalDateTime startsAt;

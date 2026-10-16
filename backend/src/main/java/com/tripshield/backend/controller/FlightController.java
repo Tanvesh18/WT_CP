@@ -76,7 +76,7 @@ public class FlightController {
         if (id == null || !id.matches("off_[A-Za-z0-9]+")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid Duffel offer ID");
         try {
             FlightOffer offer = parseOffer(request("/air/offers/" + id, "GET", null).path("data"));
-            if (offer == null || expired(offer.expiresAt())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer expired. Search again.");
+            if (offer == null || !id.equals(offer.id()) || expired(offer.expiresAt())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer unavailable or changed. Search again.");
             return offer;
         } catch (ResponseStatusException ex) { throw ex; }
         catch (Exception ex) { throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Could not verify the Duffel offer. Try again."); }

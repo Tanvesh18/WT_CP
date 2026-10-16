@@ -66,7 +66,7 @@ public class Access {
     public boolean canView(Trip trip) {
         AppUser user = current();
         return "COORDINATOR".equals(user.role)
-                || user.email.equalsIgnoreCase(trip.travelerEmail == null ? "" : trip.travelerEmail);
+                || (trip.ownerUserId != null && trip.ownerUserId.equals(user.id));
     }
 
     public void view(Trip trip) {

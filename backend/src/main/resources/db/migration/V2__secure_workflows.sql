@@ -1,0 +1,11 @@
+ALTER TABLE trip ADD COLUMN owner_user_id BIGINT NULL, ADD COLUMN estimated_budget DECIMAL(38,2) NULL, ADD COLUMN budget_currency VARCHAR(255) NULL, ADD COLUMN review_comment VARCHAR(255) NULL;
+ALTER TABLE trip_item ADD COLUMN estimated_cost DECIMAL(38,2) NULL, ADD COLUMN cost_currency VARCHAR(255) NULL;
+ALTER TABLE trip_event ADD COLUMN actor_user_id BIGINT NULL, ADD COLUMN actor_role VARCHAR(255) NULL, ADD COLUMN change_json TEXT NULL;
+CREATE INDEX idx_trip_owner ON trip(owner_user_id);
+CREATE TABLE trip_invitation (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, trip_id BIGINT NOT NULL, email VARCHAR(255) NOT NULL, token_hash VARCHAR(64) NOT NULL UNIQUE, expires_at DATETIME(6) NOT NULL, used_at DATETIME(6), issued_by_user_id BIGINT NOT NULL);
+CREATE INDEX idx_invitation_trip ON trip_invitation(trip_id);
+CREATE TABLE trip_create_key (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, actor_user_id BIGINT NOT NULL, request_key VARCHAR(100) NOT NULL, request_hash VARCHAR(64) NOT NULL, trip_id BIGINT NOT NULL, CONSTRAINT uq_create_actor_key UNIQUE(actor_user_id, request_key));
+CREATE TABLE user_notification (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL, trip_id BIGINT NOT NULL, type VARCHAR(255) NOT NULL, message VARCHAR(500) NOT NULL, created_at DATETIME(6) NOT NULL, read_at DATETIME(6));
+CREATE INDEX idx_notification_user ON user_notification(user_id, read_at);
+CREATE TABLE notification_outbox (id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, trip_id BIGINT NOT NULL, recipient VARCHAR(255), subject VARCHAR(255), body TEXT, status VARCHAR(255) NOT NULL, attempts INT NOT NULL, next_attempt_at DATETIME(6) NOT NULL, created_at DATETIME(6) NOT NULL, sent_at DATETIME(6), last_error VARCHAR(255));
+CREATE INDEX idx_outbox_due ON notification_outbox(status, next_attempt_at);

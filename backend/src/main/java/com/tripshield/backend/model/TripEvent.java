@@ -9,6 +9,9 @@ public class TripEvent {
     public Long id;
     public Long tripId;
     public Long itemId;
+    public Long actorUserId;
+    public String actorRole;
+    @Column(columnDefinition = "TEXT") public String changeJson;
     public String type;
     @Column(length = 1000)
     public String details;

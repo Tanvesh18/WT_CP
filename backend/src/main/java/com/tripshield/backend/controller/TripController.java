@@ -7,12 +7,25 @@ import com.tripshield.backend.model.TripItem;
 import com.tripshield.backend.repository.AlternativeRepository;
 import com.tripshield.backend.repository.TripEventRepository;
 import com.tripshield.backend.repository.TripRepository;
+import com.tripshield.backend.repository.TripCreateKeyRepository;
+import com.tripshield.backend.security.UserRepository;
+import com.tripshield.backend.model.TripCreateKey;
+import com.tripshield.backend.security.AppUser;
+import com.tripshield.backend.service.TravelerNotifications;
+import tools.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.util.Map;
+import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDate;
@@ -38,24 +51,37 @@ public class TripController {
     private final Access access;
     private final DisruptionPlanner planner;
     private final FlightController flights;
+    private final TripCreateKeyRepository createKeys;
+    private final UserRepository users;
+    private final TravelerNotifications notifications;
+    private final ObjectMapper json;
 
-    public TripController(TripRepository trips, AlternativeRepository alternatives, TripEventRepository events, EmailAlerts emailAlerts, Access access, DisruptionPlanner planner, FlightController flights) {
+    public TripController(TripRepository trips, AlternativeRepository alternatives, TripEventRepository events, EmailAlerts emailAlerts, Access access, DisruptionPlanner planner, FlightController flights, TripCreateKeyRepository createKeys, UserRepository users, TravelerNotifications notifications, ObjectMapper json) {
         this.trips = trips; this.alternatives = alternatives; this.events = events; this.emailAlerts = emailAlerts; this.access = access; this.planner = planner; this.flights = flights;
+        this.createKeys = createKeys; this.users = users; this.notifications = notifications; this.json = json;
     }
 
-    public record ItemInput(@NotBlank String kind, @NotBlank String title, @NotBlank String location,
-                            @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt, String flightSource, String flightOfferId, String flightAmount, String flightCurrency, String flightExpiresAt) {}
-    public record TripInput(@NotBlank String traveler, @NotBlank @jakarta.validation.constraints.Email String travelerEmail, @NotBlank String origin, @NotBlank String destination, String originAirportCode, String destinationAirportCode,
+    public record ItemInput(@NotBlank String kind, @NotBlank @Size(max=180) String title, @NotBlank @Size(max=180) String location,
+                            @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt, String flightSource, String flightOfferId, String flightAmount, String flightCurrency, String flightExpiresAt, BigDecimal estimatedCost, String costCurrency) {
+        public ItemInput(String kind, String title, String location, LocalDateTime startsAt, LocalDateTime endsAt, String flightSource, String flightOfferId, String flightAmount, String flightCurrency, String flightExpiresAt) {
+            this(kind,title,location,startsAt,endsAt,flightSource,flightOfferId,flightAmount,flightCurrency,flightExpiresAt,null,null);
+        }
+    }
+    public record TripInput(@NotBlank @Size(max=180) String traveler, @NotBlank @jakarta.validation.constraints.Email @Size(max=255) String travelerEmail, @NotBlank @Size(max=180) String origin, @NotBlank @Size(max=180) String destination, String originAirportCode, String destinationAirportCode,
                             @NotNull LocalDate startDate, @NotNull LocalDate endDate,
-                            @NotEmpty List<@Valid ItemInput> items) {}
-    public record EditItemInput(Long id, @NotBlank String kind, @NotBlank String title, @NotBlank String location, @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt, String flightSource, String flightOfferId, String flightAmount, String flightCurrency, String flightExpiresAt) {}
-    public record EditTripInput(@NotBlank String traveler, @NotBlank @jakarta.validation.constraints.Email String travelerEmail, @NotBlank String origin, @NotBlank String destination, String originAirportCode, String destinationAirportCode, @NotNull LocalDate startDate, @NotNull LocalDate endDate, List<@Valid EditItemInput> items) {}
+                            @NotEmpty List<@Valid ItemInput> items, Long travelerUserId, BigDecimal estimatedBudget, String budgetCurrency) {
+        public TripInput(String traveler, String travelerEmail, String origin, String destination, String originAirportCode, String destinationAirportCode, LocalDate startDate, LocalDate endDate, List<ItemInput> items) {
+            this(traveler, travelerEmail, origin, destination, originAirportCode, destinationAirportCode, startDate, endDate, items, null, null, null);
+        }
+    }
+    public record EditItemInput(Long id, @NotBlank String kind, @NotBlank @Size(max=180) String title, @NotBlank @Size(max=180) String location, @NotNull LocalDateTime startsAt, @NotNull LocalDateTime endsAt, String flightSource, String flightOfferId, String flightAmount, String flightCurrency, String flightExpiresAt, BigDecimal estimatedCost, String costCurrency) {}
+    public record EditTripInput(@NotBlank @Size(max=180) String traveler, @NotBlank @jakarta.validation.constraints.Email @Size(max=255) String travelerEmail, @NotBlank @Size(max=180) String origin, @NotBlank @Size(max=180) String destination, String originAirportCode, String destinationAirportCode, @NotNull LocalDate startDate, @NotNull LocalDate endDate, List<@Valid EditItemInput> items) {}
     public record ItemView(Long id, String kind, String title, String location, LocalDateTime startsAt,
-                           LocalDateTime endsAt, String status, String changeNote, String flightSource, String flightOfferId, String flightAmount, String flightCurrency, String flightExpiresAt, String flightOriginTimeZone, String flightDestinationTimeZone, Integer flightDurationMinutes, Integer flightStops, String flightOperatingCarriers, String flightRouteJson) {}
+                           LocalDateTime endsAt, String status, String changeNote, String flightSource, String flightOfferId, String flightAmount, String flightCurrency, String flightExpiresAt, String flightOriginTimeZone, String flightDestinationTimeZone, Integer flightDurationMinutes, Integer flightStops, String flightOperatingCarriers, String flightRouteJson, BigDecimal estimatedCost, String costCurrency) {}
     public record TripView(Long id, String traveler, String travelerEmail, String origin, String destination, String originAirportCode, String destinationAirportCode, LocalDate startDate,
                            LocalDate endDate, String status, String riskLevel, String riskReason,
                            String checkInStatus, LocalDateTime checkedInAt, String checkInNote,
-                           List<ItemView> items) {}
+                           List<ItemView> items, Long ownerUserId, BigDecimal estimatedBudget, String budgetCurrency, Map<String,BigDecimal> costTotals, boolean budgetExceeded, String reviewComment) {}
     public record DisruptionInput(@NotBlank String type, @NotNull Long itemId) {}
     public record CheckInInput(@NotBlank String status, String note) {}
     public record ImpactView(String message, ItemView affectedItem, List<SegmentImpact> impactedSegments, List<OptionView> alternatives, String recoverySearchMessage) {}
@@ -74,14 +100,30 @@ public class TripController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public TripView create(@Valid @RequestBody TripInput input) {
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public TripView create(@RequestHeader("Idempotency-Key") String requestKey, @Valid @RequestBody TripInput input) {
+        if (requestKey.isBlank() || requestKey.length() > 100) throw badRequest("Idempotency-Key must contain 1 to 100 characters");
+        AppUser actor = access.current();
+        users.findWithLockById(actor.id).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account unavailable"));
+        String fingerprint = HexFormat.of().formatHex(sha256(json.writeValueAsBytes(input)));
+        var previous = createKeys.findByActorUserIdAndRequestKey(actor.id, requestKey);
+        if (previous.isPresent()) {
+            if (!previous.get().requestHash.equals(fingerprint)) throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency key was already used for different trip details");
+            return view(trips.findById(previous.get().tripId).orElseThrow(() -> notFound("Trip not found")));
+        }
         if (input.startDate().isBefore(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")))) throw badRequest("Departure date cannot be before today");
         if (input.endDate().isBefore(input.startDate())) throw badRequest("Trip end date must be on or after departure date");
-        var actor = access.current();
         boolean travelerRequest = "TRAVELER".equals(actor.role);
         if (travelerRequest && !actor.email.equalsIgnoreCase(input.travelerEmail().trim())) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can request a trip only for your own account");
         Trip trip = new Trip();
         if (travelerRequest) trip.lifecycle = "REQUESTED";
+        trip.ownerUserId = travelerRequest ? actor.id : null;
+        if (!travelerRequest && input.travelerUserId() != null) {
+            AppUser owner = users.findById(input.travelerUserId()).orElseThrow(() -> badRequest("Traveler account not found"));
+            if (!"TRAVELER".equals(owner.role) || !owner.email.equalsIgnoreCase(input.travelerEmail().trim())) throw badRequest("Traveler account does not match email");
+            trip.ownerUserId = owner.id;
+        }
+        setBudget(trip, input.estimatedBudget(), input.budgetCurrency());
         trip.traveler = travelerRequest ? actor.name : input.traveler().trim(); trip.travelerEmail = travelerRequest ? actor.email : input.travelerEmail().trim().toLowerCase(); trip.origin = input.origin().trim();
         trip.destination = input.destination().trim(); trip.originAirportCode = code(input.originAirportCode()); trip.destinationAirportCode = code(input.destinationAirportCode()); validateAirportPair(trip); trip.startDate = input.startDate(); trip.endDate = input.endDate();
         for (ItemInput value : input.items()) {
@@ -91,28 +133,52 @@ public class TripController {
             item.title = value.title().trim(); item.location = value.location().trim();
             item.startsAt = value.startsAt(); item.endsAt = value.endsAt();
             flightMetadata(item, value.flightSource(), value.flightOfferId(), true);
+            if (!"FLIGHT".equals(kind)) setCost(item, value.estimatedCost(), value.costCurrency());
             validateFlightRoute(item, trip); validateSchedule(item, trip);
             trip.items.add(item);
         }
         Trip saved = trips.saveAndFlush(trip);
-        events.save(new TripEvent(saved.id, null, travelerRequest ? "BOOKING_REQUESTED" : "TRIP_CREATED", travelerRequest ? "Booking request submitted by " + saved.traveler : "Trip created for " + saved.traveler));
+        TripCreateKey key = new TripCreateKey(); key.actorUserId = actor.id; key.requestKey = requestKey; key.requestHash = fingerprint; key.tripId = saved.id; createKeys.save(key);
+        event(saved.id, null, travelerRequest ? "BOOKING_REQUESTED" : "TRIP_CREATED", "Trip created for " + saved.traveler, Map.of("status", saved.lifecycle));
         return view(saved);
     }
 
     @PostMapping("/{id}/approve")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TripView approve(@PathVariable Long id) {
-        access.coordinator(); Trip trip = find(id);
+        access.coordinator(); Trip trip = findForUpdate(id);
         if (!"REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not awaiting approval");
+        for (TripItem item : trip.items) if (item.flightOfferId != null) verifyTripOffer(item);
         trip.lifecycle = "ACTIVE";
-        events.save(new TripEvent(id, null, "REQUEST_APPROVED", "Booking request approved as an itinerary plan; no ticket was issued"));
+        event(id, null, "REQUEST_APPROVED", "Booking request approved as an itinerary plan; no ticket was issued", Map.of("status", "ACTIVE"));
+        notifications.add(trip, "APPROVED", "Your trip request was approved as an itinerary plan.");
+        return view(trips.save(trip));
+    }
+
+    public record ReviewInput(String comment) {}
+
+    @PostMapping("/{id}/reject")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public TripView reject(@PathVariable Long id, @RequestBody(required = false) ReviewInput input) {
+        access.coordinator(); Trip trip = findForUpdate(id);
+        if (!"REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not awaiting approval");
+        String comment = input == null || input.comment() == null ? null : input.comment().trim();
+        if (comment != null && comment.length() > 255) throw badRequest("Comment is too long");
+        trip.lifecycle = "REJECTED"; trip.reviewComment = comment;
+        event(id, null, "REQUEST_REJECTED", "Booking request rejected", Map.of("status", "REJECTED", "comment", comment == null ? "" : comment));
+        notifications.add(trip, "REJECTED", "Your trip request was rejected" + (comment == null || comment.isBlank() ? "." : ": " + comment));
         return view(trips.save(trip));
     }
 
     @PutMapping("/{id}")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TripView update(@PathVariable Long id, @Valid @RequestBody EditTripInput input) {
-        access.coordinator(); Trip trip = find(id);
-        if ("CANCELLED".equals(trip.lifecycle)) throw badRequest("Cancelled trips cannot be edited");
+        access.coordinator(); Trip trip = findForUpdate(id);
+        if ("CANCELLED".equals(trip.lifecycle) || "REJECTED".equals(trip.lifecycle)) throw badRequest("Closed trips cannot be edited");
         if (input.endDate().isBefore(input.startDate())) throw badRequest("End date must be after start date");
+        if (input.items() == null || input.items().isEmpty()) throw badRequest("Add at least one itinerary item");
+        if (trip.ownerUserId != null && !trip.travelerEmail.equalsIgnoreCase(input.travelerEmail().trim()))
+            throw badRequest("Cannot change email on an assigned trip");
         trip.traveler = input.traveler().trim(); trip.travelerEmail = input.travelerEmail().trim().toLowerCase(); trip.origin = input.origin().trim(); trip.destination = input.destination().trim();
         trip.originAirportCode = code(input.originAirportCode()); trip.destinationAirportCode = code(input.destinationAirportCode()); validateAirportPair(trip);
         trip.startDate = input.startDate(); trip.endDate = input.endDate();
@@ -127,35 +193,43 @@ public class TripController {
             item.kind = value.kind().toUpperCase();
             if (!preserveOffer) { item.title = value.title().trim(); item.location = value.location().trim(); item.startsAt = value.startsAt(); item.endsAt = value.endsAt(); }
             flightMetadata(item, value.flightSource(), value.flightOfferId(), !preserveOffer);
+            if (!"FLIGHT".equals(item.kind)) setCost(item, value.estimatedCost(), value.costCurrency());
             validateFlightRoute(item, trip); validateSchedule(item, trip);
         }
         trip.items.removeIf(item -> item.id != null && "CONFIRMED".equals(item.status) && !retained.contains(item.id));
-        Trip saved = trips.saveAndFlush(trip); events.save(new TripEvent(id, null, "TRIP_UPDATED", "Trip details updated")); return view(saved);
+        Trip saved = trips.saveAndFlush(trip); event(id, null, "TRIP_UPDATED", "Trip details updated", Map.of("itemCount", saved.items.size()));
+        notifications.add(saved, "ITINERARY_CHANGED", "Your itinerary was updated."); return view(saved);
     }
 
     @PostMapping("/{id}/cancel")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TripView cancel(@PathVariable Long id) {
-        access.coordinator(); Trip trip = find(id); trip.lifecycle = "CANCELLED";
-        events.save(new TripEvent(id, null, "TRIP_CANCELLED", "Trip cancelled")); return view(trips.save(trip));
+        access.coordinator(); Trip trip = findForUpdate(id);
+        if ("CANCELLED".equals(trip.lifecycle) || "REJECTED".equals(trip.lifecycle)) throw badRequest("Trip is already closed");
+        trip.lifecycle = "CANCELLED";
+        event(id, null, "TRIP_CANCELLED", "Trip cancelled", Map.of("status", "CANCELLED"));
+        notifications.add(trip, "CANCELLED", "Your trip was cancelled."); return view(trips.save(trip));
     }
 
     @PostMapping("/{id}/check-in")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TripView checkIn(@PathVariable Long id, @Valid @RequestBody CheckInInput input) {
-        access.coordinator(); Trip trip = find(id);
-        if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active");
+        Trip trip = findForUpdate(id);
+        if (!"ACTIVE".equals(trip.lifecycle)) throw badRequest("Trip is not active");
         String status = input.status().toUpperCase();
         if (!List.of("SAFE", "NEEDS_HELP").contains(status)) throw badRequest("Status must be SAFE or NEEDS_HELP");
         trip.checkInStatus = status; trip.checkedInAt = LocalDateTime.now();
         trip.checkInNote = input.note() == null ? null : input.note().trim();
-        if (trip.checkInNote != null && trip.checkInNote.length() > 500) throw badRequest("Note is too long");
-        events.save(new TripEvent(trip.id, null, "CHECK_IN", status + (trip.checkInNote == null || trip.checkInNote.isBlank() ? "" : ": " + trip.checkInNote)));
+        if (trip.checkInNote != null && trip.checkInNote.length() > 255) throw badRequest("Note is too long");
+        event(trip.id, null, "CHECK_IN", status + (trip.checkInNote == null || trip.checkInNote.isBlank() ? "" : ": " + trip.checkInNote), Map.of("status", status));
         if ("NEEDS_HELP".equals(status)) emailAlerts.helpRequested(trip);
         return view(trips.save(trip));
     }
 
     @PostMapping("/{id}/disruptions")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ImpactView disrupt(@PathVariable Long id, @Valid @RequestBody DisruptionInput input) {
-        access.coordinator(); Trip trip = find(id);
+        access.coordinator(); Trip trip = findForUpdate(id);
         if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active");
         TripItem item = item(trip, input.itemId());
         String type = input.type().toUpperCase();
@@ -179,30 +253,33 @@ public class TripController {
             }
         }
         trips.save(trip);
-        events.save(new TripEvent(trip.id, item.id, "DISRUPTION",
-                item.changeNote + " affected " + item.title + "; " + impacted.size() + " later segment(s) at risk"));
+        event(trip.id, item.id, "DISRUPTION", item.changeNote + " affected " + item.title + "; " + impacted.size() + " later segment(s) at risk", Map.of("type", type, "impactedCount", impacted.size()));
+        notifications.add(trip, "DISRUPTION", "A simulated disruption affects " + item.title + ".");
         String searchMessage = "FLIGHT_CANCELLATION".equals(type) && item.flightSource != null ? refreshDuffelAlternatives(trip, item) : null;
         return impact(trip, item, searchMessage);
     }
 
     @GetMapping("/{id}/items/{itemId}/alternatives")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ImpactView options(@PathVariable Long id, @PathVariable Long itemId) {
-        access.coordinator(); Trip trip = find(id); TripItem item = item(trip, itemId);
+        access.coordinator(); Trip trip = findForUpdate(id); TripItem item = item(trip, itemId);
         if (!List.of("AFFECTED", "AT_RISK").contains(item.status)) throw badRequest("This segment does not need recovery");
         return impact(trip, item);
     }
 
     @PostMapping("/{id}/items/{itemId}/alternatives/refresh")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ImpactView refreshFlightOptions(@PathVariable Long id, @PathVariable Long itemId) {
-        access.coordinator(); Trip trip = find(id); if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active"); TripItem item = item(trip, itemId);
+        access.coordinator(); Trip trip = findForUpdate(id); if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active"); TripItem item = item(trip, itemId);
         if (!"AFFECTED".equals(item.status) || !"FLIGHT_CANCELLATION".equals(item.disruptionType) || item.flightSource == null)
             throw badRequest("Duffel replacement search is available for cancelled Duffel flights");
         return impact(trip, item, refreshDuffelAlternatives(trip, item));
     }
 
     @PostMapping("/{id}/items/{itemId}/alternatives/{alternativeId}/apply")
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TripView apply(@PathVariable Long id, @PathVariable Long itemId, @PathVariable Long alternativeId) {
-        access.coordinator(); Trip trip = find(id);
+        access.coordinator(); Trip trip = findForUpdate(id);
         if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active");
         TripItem affected = item(trip, itemId);
         if (!List.of("AFFECTED", "AT_RISK").contains(affected.status)) throw badRequest("Item does not need recovery");
@@ -221,7 +298,7 @@ public class TripController {
             if ("AT_RISK".equals(dependent.status) && affected.id.equals(dependent.riskSourceItemId)
                     && !atRiskIds.contains(dependent.id)) {
                 dependent.status = "CONFIRMED"; dependent.changeNote = null; dependent.riskSourceItemId = null;
-                events.save(new TripEvent(trip.id, dependent.id, "CONNECTION_CLEARED", dependent.title + " is back on track"));
+                event(trip.id, dependent.id, "CONNECTION_CLEARED", dependent.title + " is back on track", Map.of("status", "CONFIRMED"));
             }
         }
         for (SegmentImpact consequence : remainingRisk) {
@@ -236,6 +313,7 @@ public class TripController {
         replacement.title = option.title; replacement.location = option.location;
         replacement.startsAt = option.startsAt; replacement.endsAt = option.endsAt;
         replacement.replacesItemId = affected.id;
+        replacement.estimatedCost = option.estimatedCost; replacement.costCurrency = option.currency;
         if (option.source != null) {
             replacement.flightSource = option.source; replacement.flightOfferId = option.flightOfferId;
             replacement.flightAmount = option.estimatedCost.toPlainString(); replacement.flightCurrency = option.currency;
@@ -248,9 +326,10 @@ public class TripController {
         affected.status = "REPLACED";
         trip.items.add(replacement);
         Trip saved = trips.saveAndFlush(trip);
-        events.save(new TripEvent(saved.id, affected.id, "ALTERNATIVE_APPLIED",
+        event(saved.id, affected.id, "ALTERNATIVE_APPLIED",
                 option.title + " replaced " + affected.title + "; " + remainingRisk.size() + " later segment(s) still need attention"
-                + (option.source == null ? "" : "; Duffel offer added to itinerary only, no ticket booked")));
+                + (option.source == null ? "" : "; Duffel offer added to itinerary only, no ticket booked"), Map.of("alternativeId", option.id, "remainingRisk", remainingRisk.size()));
+        notifications.add(saved, "ITINERARY_CHANGED", "A recovery option was added to your itinerary.");
         return view(saved);
     }
 
@@ -275,8 +354,9 @@ public class TripController {
                 .filter(option -> option.source == null || offerCurrent(option)).filter(option -> planner.fits(trip, item, option))
                 .map(option -> planner.describe(trip, item, option))
                 .sorted(Comparator.comparingInt((OptionView option) -> option.impactedSegments().size())
-                        .thenComparingInt(OptionView::delayMinutes)
-                        .thenComparing(OptionView::estimatedCost))
+                        .thenComparingInt(option -> option.arrivalDelayMinutes() == null ? Math.max(0, option.delayMinutes()) : Math.max(0, option.arrivalDelayMinutes()))
+                        .thenComparing((a, b) -> a.currency() != null && a.currency().equals(b.currency())
+                                ? a.estimatedCost().compareTo(b.estimatedCost()) : 0))
                 .toList();
         List<SegmentImpact> impacted = "AFFECTED".equals(item.status)
                 ? planner.assessDisruption(trip, item, item.disruptionType == null ? defaultType(item.kind) : item.disruptionType)
@@ -302,17 +382,19 @@ public class TripController {
                     .limit(12).toList()) {
                 Alternative option = saved.stream().filter(value -> offer.id().equals(value.flightOfferId)).findFirst().orElse(null);
                 if (option == null) option = new Alternative(trip.id, item.id, "FLIGHT", offer.title(),
-                        offer.origin() + " → " + offer.destination(), LocalDateTime.parse(offer.departingAt()),
-                        LocalDateTime.parse(offer.arrivingAt()), offer.totalAmount(), "Duffel offer for the cancelled route; itinerary planning only.");
+                        offer.origin() + " → " + offer.destination(), flightLocalTime(offer.departingAt(), offer.originTimeZone()),
+                        flightLocalTime(offer.arrivingAt(), offer.destinationTimeZone()), offer.totalAmount(), "Duffel offer for the cancelled route; itinerary planning only.");
                 option.kind = "FLIGHT"; option.title = offer.title(); option.location = offer.origin() + " → " + offer.destination();
-                option.startsAt = LocalDateTime.parse(offer.departingAt()); option.endsAt = LocalDateTime.parse(offer.arrivingAt());
+                option.startsAt = flightLocalTime(offer.departingAt(), offer.originTimeZone()); option.endsAt = flightLocalTime(offer.arrivingAt(), offer.destinationTimeZone());
                 option.estimatedCost = new java.math.BigDecimal(offer.totalAmount()); option.source = offer.source(); option.currency = offer.totalCurrency();
                 option.flightOfferId = offer.id(); option.flightExpiresAt = offer.expiresAt();
                 option.flightOriginTimeZone = offer.originTimeZone(); option.flightDestinationTimeZone = offer.destinationTimeZone();
                 option.flightStops = offer.stops(); option.flightDurationMinutes = offer.durationMinutes();
                 option.flightOperatingCarriers = offer.operatingCarriers().length() > 250 ? offer.operatingCarriers().substring(0, 250) : offer.operatingCarriers();
                 option.flightRouteJson = flights.routeJson(offer); option.recoverySearchId = item.recoverySearchId;
-                option.delayMinutes = (int) java.time.Duration.between(item.startsAt, option.startsAt).toMinutes();
+                option.delayMinutes = (int) java.time.Duration.between(
+                        flightInstant(item.startsAt, item.flightOriginTimeZone),
+                        flightInstant(option.startsAt, option.flightOriginTimeZone)).toMinutes();
                 option.arrivalDelayMinutes = arrivalDelay(item, option);
                 option.costDifference = item.flightCurrency != null && item.flightCurrency.equals(option.currency) && item.flightAmount != null
                         ? option.estimatedCost.subtract(new java.math.BigDecimal(item.flightAmount)) : null;
@@ -339,10 +421,10 @@ public class TripController {
     private void verifyRecoveryOffer(Alternative option) {
         if (!offerCurrent(option)) throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer expired. Refresh replacement flights.");
         FlightController.FlightOffer current = flights.verifiedOffer(option.flightOfferId);
-        if (!current.source().equals(option.source) || !current.totalCurrency().equals(option.currency)
+        if (!current.id().equals(option.flightOfferId) || !current.source().equals(option.source) || !current.totalCurrency().equals(option.currency)
                 || new java.math.BigDecimal(current.totalAmount()).compareTo(option.estimatedCost) != 0
-                || !LocalDateTime.parse(current.departingAt()).equals(option.startsAt)
-                || !LocalDateTime.parse(current.arrivingAt()).equals(option.endsAt)
+                || !flightInstant(current.departingAt(), current.originTimeZone()).equals(flightInstant(option.startsAt, option.flightOriginTimeZone))
+                || !flightInstant(current.arrivingAt(), current.destinationTimeZone()).equals(flightInstant(option.endsAt, option.flightDestinationTimeZone))
                 || !(current.origin() + " → " + current.destination()).equals(option.location)
                 || !flights.routeJson(current).equals(option.flightRouteJson))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer changed. Refresh replacement flights before applying it.");
@@ -358,16 +440,40 @@ public class TripController {
         if (!List.of("DUFFEL_TEST", "DUFFEL_LIVE").contains(source)) throw badRequest("Invalid flight source");
         if (!verify && offerId.equals(item.flightOfferId) && source.equals(item.flightSource)) return;
         FlightController.FlightOffer offer = flights.verifiedOffer(offerId);
+        if (!offerId.equals(offer.id())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer ID changed. Search again.");
         if (!source.equals(offer.source())) throw badRequest("Flight offer source does not match");
         item.title = offer.title(); item.location = offer.origin() + " → " + offer.destination();
-        item.startsAt = LocalDateTime.parse(offer.departingAt()); item.endsAt = LocalDateTime.parse(offer.arrivingAt());
+        item.startsAt = flightLocalTime(offer.departingAt(), offer.originTimeZone());
+        item.endsAt = flightLocalTime(offer.arrivingAt(), offer.destinationTimeZone());
         item.flightSource = offer.source(); item.flightOfferId = offer.id(); item.flightAmount = offer.totalAmount();
         item.flightCurrency = offer.totalCurrency(); item.flightExpiresAt = offer.expiresAt();
         item.flightOriginTimeZone = offer.originTimeZone(); item.flightDestinationTimeZone = offer.destinationTimeZone();
         item.flightDurationMinutes = offer.durationMinutes(); item.flightStops = offer.stops();
         item.flightOperatingCarriers = offer.operatingCarriers().length() > 250 ? offer.operatingCarriers().substring(0, 250) : offer.operatingCarriers();
         item.flightRouteJson = flights.routeJson(offer);
+        item.estimatedCost = new BigDecimal(offer.totalAmount()); item.costCurrency = offer.totalCurrency();
     }
+    private LocalDateTime flightLocalTime(String value, String airportTimeZone) {
+        try {
+            return java.time.OffsetDateTime.parse(value).atZoneSameInstant(java.time.ZoneId.of(airportTimeZone)).toLocalDateTime();
+        } catch (java.time.format.DateTimeParseException noOffset) {
+            return LocalDateTime.parse(value);
+        } catch (java.time.DateTimeException invalidZone) {
+            throw badRequest("Flight has invalid airport time zones");
+        }
+    }
+
+    private java.time.Instant flightInstant(String value, String airportTimeZone) {
+        try { return java.time.OffsetDateTime.parse(value).toInstant(); }
+        catch (java.time.format.DateTimeParseException noOffset) {
+            return LocalDateTime.parse(value).atZone(java.time.ZoneId.of(airportTimeZone)).toInstant();
+        }
+    }
+
+    private java.time.Instant flightInstant(LocalDateTime value, String airportTimeZone) {
+        return value.atZone(java.time.ZoneId.of(airportTimeZone)).toInstant();
+    }
+
     private String code(String value) {
         if (value == null || value.isBlank()) return null;
         String normalized = value.trim().toUpperCase();
@@ -405,6 +511,7 @@ public class TripController {
         };
     }
 
+    private Trip findForUpdate(Long id) { Trip trip = trips.findByIdForUpdate(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
     private Trip find(Long id) { Trip trip = trips.findById(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
     private TripItem item(Trip trip, Long id) {
         return trip.items.stream().filter(value -> value.id.equals(id)).findFirst()
@@ -412,22 +519,57 @@ public class TripController {
     }
     private ItemView itemView(TripItem item) {
         return new ItemView(item.id, item.kind, item.title, item.location, item.startsAt,
-                item.endsAt, item.status, item.changeNote, item.flightSource, item.flightOfferId, item.flightAmount, item.flightCurrency, item.flightExpiresAt, item.flightOriginTimeZone, item.flightDestinationTimeZone, item.flightDurationMinutes, item.flightStops, item.flightOperatingCarriers, item.flightRouteJson);
+                item.endsAt, item.status, item.changeNote, item.flightSource, item.flightOfferId, item.flightAmount, item.flightCurrency, item.flightExpiresAt, item.flightOriginTimeZone, item.flightDestinationTimeZone, item.flightDurationMinutes, item.flightStops, item.flightOperatingCarriers, item.flightRouteJson, item.estimatedCost, item.costCurrency);
     }
     private TripView view(Trip trip) {
         List<ItemView> items = trip.items.stream().sorted(Comparator.comparing(i -> i.startsAt)).map(this::itemView).toList();
         long affected = items.stream().filter(i -> "AFFECTED".equals(i.status())).count();
         long atRisk = items.stream().filter(i -> "AT_RISK".equals(i.status())).count();
         boolean needsHelp = "NEEDS_HELP".equals(trip.checkInStatus);
-        String status = "CANCELLED".equals(trip.lifecycle) ? "CANCELLED" : "REQUESTED".equals(trip.lifecycle) ? "REQUESTED" : affected > 0 || atRisk > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
+        String status = "CANCELLED".equals(trip.lifecycle) ? "CANCELLED" : "REJECTED".equals(trip.lifecycle) ? "REJECTED" : "REQUESTED".equals(trip.lifecycle) ? "REQUESTED" : affected > 0 || atRisk > 0 || needsHelp ? "NEEDS_ATTENTION" : "ON_TRACK";
         String risk = needsHelp || affected + atRisk > 1 ? "HIGH" : affected + atRisk == 1 ? "MEDIUM" : "LOW";
         String reason = needsHelp ? "Traveler requested help" : atRisk > 0
                 ? affected + " disrupted and " + atRisk + " connected segment(s) at risk"
                 : affected > 1 ? "Multiple unresolved disruptions"
                 : affected == 1 ? "One unresolved disruption" : "No active disruption or help request";
+        Map<String,BigDecimal> totals = new java.util.TreeMap<>();
+        trip.items.stream().filter(i -> !"REPLACED".equals(i.status) && i.estimatedCost != null && i.costCurrency != null)
+                .forEach(i -> totals.merge(i.costCurrency, i.estimatedCost, BigDecimal::add));
+        boolean exceeded = trip.estimatedBudget != null && trip.budgetCurrency != null && totals.getOrDefault(trip.budgetCurrency, BigDecimal.ZERO).compareTo(trip.estimatedBudget) > 0;
         return new TripView(trip.id, trip.traveler, trip.travelerEmail, trip.origin, trip.destination, trip.originAirportCode, trip.destinationAirportCode, trip.startDate,
                 trip.endDate, status, risk, reason, trip.checkInStatus == null ? "PENDING" : trip.checkInStatus,
-                trip.checkedInAt, trip.checkInNote, items);
+                trip.checkedInAt, trip.checkInNote, items, trip.ownerUserId, trip.estimatedBudget, trip.budgetCurrency, totals, exceeded, trip.reviewComment);
+    }
+    private void setBudget(Trip trip, BigDecimal amount, String currency) {
+        if (amount == null && (currency == null || currency.isBlank())) return;
+        if (amount == null || amount.signum() < 0 || amount.scale() > 2 || amount.precision() > 18 || currency == null || !currency.matches("[A-Z]{3}")) throw badRequest("Budget requires a nonnegative amount with at most two decimals and three-letter currency");
+        trip.estimatedBudget = amount; trip.budgetCurrency = currency;
+    }
+    private void setCost(TripItem item, BigDecimal amount, String currency) {
+        if (amount == null && (currency == null || currency.isBlank())) { item.estimatedCost = null; item.costCurrency = null; return; }
+        if (amount == null || amount.signum() < 0 || amount.scale() > 2 || amount.precision() > 18 || currency == null || !currency.matches("[A-Z]{3}")) throw badRequest("Estimated cost requires a nonnegative amount with at most two decimals and three-letter currency");
+        item.estimatedCost = amount; item.costCurrency = currency;
+    }
+    private void verifyTripOffer(TripItem item) {
+        if (item.flightExpiresAt == null || !java.time.Instant.parse(item.flightExpiresAt).isAfter(java.time.Instant.now()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer expired. Refresh the trip before approval.");
+        FlightController.FlightOffer offer = flights.verifiedOffer(item.flightOfferId);
+        if (!item.flightOfferId.equals(offer.id())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer ID changed. Refresh the trip before approval.");
+        if (!offer.source().equals(item.flightSource) || !offer.totalCurrency().equals(item.flightCurrency)
+                || new BigDecimal(offer.totalAmount()).compareTo(new BigDecimal(item.flightAmount)) != 0
+                || !flightInstant(offer.departingAt(), offer.originTimeZone()).equals(flightInstant(item.startsAt, item.flightOriginTimeZone))
+                || !flightInstant(offer.arrivingAt(), offer.destinationTimeZone()).equals(flightInstant(item.endsAt, item.flightDestinationTimeZone)))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer changed. Refresh the trip before approval.");
+    }
+    private void event(Long tripId, Long itemId, String type, String details, Map<String,?> changes) {
+        AppUser actor = access.current();
+        TripEvent event = new TripEvent(tripId, itemId, type, details);
+        event.actorUserId = actor.id; event.actorRole = actor.role; event.changeJson = json.writeValueAsString(changes);
+        events.save(event);
+    }
+    private byte[] sha256(byte[] content) {
+        try { return MessageDigest.getInstance("SHA-256").digest(content); }
+        catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
     }
     private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
     private ResponseStatusException notFound(String message) { return new ResponseStatusException(HttpStatus.NOT_FOUND, message); }

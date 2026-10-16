@@ -3,6 +3,7 @@ package com.tripshield.backend.model;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -12,6 +13,10 @@ public class Trip {
     public Long id;
     public String traveler;
     public String travelerEmail;
+    public Long ownerUserId;
+    public BigDecimal estimatedBudget;
+    public String budgetCurrency;
+    public String reviewComment;
     public String lifecycle = "ACTIVE";
     public String origin;
     public String destination;
