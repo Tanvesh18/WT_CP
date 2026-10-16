@@ -1,5 +1,51 @@
 # TripShield repository audit
 
+## Final release-readiness verification — 2026-10-17
+
+This section supersedes earlier readiness statements. No production code or development-database data was changed in this pass. No migration was run against `tripshield`. The only development-database access was a `START TRANSACTION READ ONLY` inspection.
+
+### Development database and backup gate
+
+The read-only MySQL client query targeted `jdbc:mysql://localhost:3306/tripshield` as the configured local user. Results: **5 users, 14 trips, 43 itinerary items, 0 orphaned items**. `flyway_schema_history` contains a successful V1 baseline and successful V2 `secure workflows` migration. A final read-only count after the checks remained **5 users, 14 trips, 43 items, 2 migration rows**. The earlier incident had no pre-migration row counts, so these current counts do **not** prove every historical row was preserved.
+
+**Before any further development-profile startup, back up `tripshield` to a private location outside the repository.** An example PowerShell command, run from a terminal where the MySQL client is installed, is:
+
+```powershell
+& 'C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe' --host=127.0.0.1 --port=3306 --user=root --password --single-transaction --routines --triggers --databases tripshield --result-file='C:\private-backups\tripshield-2026-10-17.sql'
+```
+
+Choose an existing private directory and verify the dump file is nonempty. `--password` prompts instead of placing a secret in the command. This command was documented, **not executed**; no backup was created during this verification. Compare table counts with a known older backup if historical preservation needs proof.
+
+### PASS / FAIL / NOT VERIFIED checklist
+
+| Check | Result | Evidence and limit |
+| --- | --- | --- |
+| Read-only development inspection | **PASS** | MySQL returned schema `tripshield`, 5 users, 14 trips, 43 items, 0 orphan items, successful Flyway V1/V2 history. No write SQL was issued. |
+| Development backup before startup | **NOT VERIFIED** | Instructions above; no dump was made. The local-profile backend startup was intentionally not run. |
+| Test profile refuses development datasource | **PASS** | Deliberate negative probe set `SPRING_DATASOURCE_URL=jdbc:mysql://127.0.0.1:3306/tripshield` and `SPRING_DATASOURCE_USERNAME=root`; `BackendApplication.java:11-20` threw `Test profile requires the isolated tripshield_test database and restricted user` during context initialization. No datasource/Flyway startup followed. Maven reported `BUILD SUCCESS` despite the application startup exception because of the development runner; the guard's rejection is evident in the log. |
+| Login, logout, and expiry | **PASS for tested API paths** | `AuthController.java:21-43`, `Access.java:25-58`; `travelerCanRegisterLoginAndLogout` and `expiredSessionIsRejectedAndRemoved` passed. No login throttling or account-disable flow exists. |
+| Invitation ownership and roles | **PASS for tested API paths** | `InvitationController.java:37-75`, `Access.java:61-75`; `guestTripRequiresSingleUseInvitationAndMatchingAccount` and `coordinatorAndTravelerEndpointAuthorizationMatrix` passed. No mailbox verification outside the invitation challenge. Browser role flows remain unverified. |
+| Outbox persistence and one retry | **PASS for tested path** | `EmailAlerts.java:25-51`, `OutboxClaims.java:13-42`; mocked SMTP success and failure tests passed. Failed send preserved `NEEDS_HELP` and left a pending retry with incremented attempts. |
+| Exactly-once email delivery | **FAIL as a guarantee** | After SMTP accepts a message but before `claims.complete()` commits, a crash leaves `SENDING`; lease recovery can send it again. A send exceeding the 10-minute lease can also overlap a second worker. This is at-least-once delivery; there is no supplier-side idempotency key. Keep SMTP alerts optional for the demonstration. |
+| Backend tests | **PASS** | `mvn.cmd test`: 36 tests, 0 failures, 0 errors, 0 skipped; log showed `jdbc:mysql://127.0.0.1:3306/tripshield_test`. Duffel and SMTP were mocked. |
+| Frontend tests, lint, build | **PASS** | `npm.cmd run test`: 10 passed, 0 failed/skipped. `npm.cmd run lint`: exit 0, no findings. `npm.cmd run build`: exit 0; 436.86 kB main JS and 151.97 kB lazy map JS. |
+| Isolated startup and HTTP wiring | **PASS** | Test-profile backend on free port 18082 logged `tripshield_test` and served `/api/health` with HTTP 200. Vite on free port 15174 served its index and proxied `/api/health` with HTTP 200. Both servers were stopped. |
+| Documented local-profile startup | **NOT VERIFIED** | It targets the development schema and was not run before a backup. The analogous isolated startup path worked. |
+| Coordinator/Traveler browser journeys | **NOT VERIFIED** | Computer-use inventory returned `apps: []`, `browsers: []`; Playwright/Puppeteer packages were absent. No visual, keyboard, or mobile claim is made. |
+| Live Duffel, real SMTP, map tiles | **NOT VERIFIED** | No live credentials, provider accounts, real email service, or browser tile fetch was used. |
+
+### Security and delivery review
+
+- **Authentication:** Passwords are bcrypt-hashed (`AuthController.java:16,29,38`). Registration checks 8–72 UTF-8 bytes. Login returns a generic 401 for bad credentials. Sessions use 32 random bytes, store only SHA-256 hashes, expire after 12 hours, and are deleted on logout/expired access (`Access.java:25-59`). Rate limiting, account disabling, forced revocation, and coordinator credential rotation are absent. These are hardening gaps for public deployment, not failures in the tested college-demo paths.
+- **Invitations and authorization:** Coordinators alone issue codes; the database stores code hashes, a seven-day expiry, and a used timestamp. Claim requires an authenticated account with the invited email and an unowned active trip. Trip access checks `ownerUserId`; coordinator mutations check role and lock the trip row. The API tests exercised cross-user denial. Invitation delivery is manual, so secure private sharing is an operational requirement. Existing guest trips do not become visible merely through registration.
+- **Outbox:** The check-in writes an outbox row in its database transaction. `OutboxClaims` locks and leases a due row in a separate transaction; `EmailAlerts` performs the SMTP call after that claim transaction completes, then records success or schedules backoff. A mocked failure and a mocked success passed. Crash/slow-send duplicate delivery remains possible, and no live SMTP reliability test was performed.
+
+### Required manual browser acceptance before a demonstration
+
+Use only synthetic accounts and `tripshield_test` or another disposable test environment. At desktop width and a 390px viewport: register and sign in as Traveler; sign out and confirm an expired session redirects; request a trip from a current Duffel **test** offer; review validation and loading/error states; have Coordinator approve and reject separate requests; verify notifications and unread state; create a guest trip, issue a code, confirm uninvited/wrong-user denial, and claim it once; simulate a disruption, refresh and apply a valid replacement, and verify history/totals; check in as Traveler with **Needs help**; verify keyboard tab order, visible focus, form labels, dialog closure, horizontal overflow, and backend-unavailable messages. Do not use live ticketing, SMTP, payment, or real traveler data.
+
+**Readiness decision:** Automated API and build checks support a controlled college demonstration using test data, but the final browser walkthrough and a development-schema backup remain required before presenting it as fully verified. Optional email has at-least-once semantics, and live Duffel/SMTP behavior is unverified.
+
 ## Phase 3 implementation and verification addendum — 2026-10-16
 
 The sections below this addendum document the earlier audit and Phase 2 baseline. Their line numbers, statuses, and 29-test count are historical. Current verified evidence and remaining risks are recorded here. This addendum does not claim browser or live-provider acceptance.
