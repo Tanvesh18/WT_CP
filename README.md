@@ -1,141 +1,79 @@
 # TripShield
 
-TripShield is a course project prototype for managing corporate trips and responding to travel disruptions. An employee or travel coordinator can create an itinerary, simulate a problem, review sample alternatives, and update the trip.
+TripShield is a college project for corporate travel planning and disruption response. Coordinators plan itineraries and review traveler requests. Travelers request trips, see assigned itineraries, check in, and receive in-app notifications. Flight results come from Duffel when configured. Hotel and transport choices are planning estimates. Disruptions are simulated; saving an offer does not issue a ticket, reserve a room, or charge a payment.
 
-## Technology
+## Stack and startup
 
-- **Frontend:** React, TypeScript, and Vite (`frontend/`)
-- **Backend:** Java, Spring Boot, REST APIs, and JPA/Hibernate (`backend/`)
-- **Database:** MySQL
+- React 19, TypeScript, Vite, Leaflet in `frontend/`
+- Java 21+, Spring Boot 4, JPA, Flyway in `backend/`
+- MySQL 8 for trips, accounts, sessions, invitations, notifications, outbox jobs, and history
 
-The frontend sends requests to the backend under `/api`. Vite forwards those requests to `http://127.0.0.1:8080` during local development. The backend stores trips, itinerary items, sample alternatives, and activity history in MySQL.
+Create a development MySQL schema named `tripshield` if needed. Copy `backend/config/local.properties.example` to ignored `backend/config/local.properties`; set the MySQL connection, coordinator bootstrap credentials, and optional Duffel/SMTP settings. Keep secrets out of Git. The **local** profile loads this file; the default profile has no datasource. Back up an existing schema before its first migration.
 
-## Implemented features
-
-- Create a trip with a traveler, origin, destination, dates, and flight, hotel, or transport items.
-- Search trips and filter by status, risk, and overlapping date range; sort by date or risk.
-- View each trip's itinerary as a day-grouped timeline with segment state and activity history.
-- Highlight trips with a disrupted or at-risk itinerary segment in the coordinator workspace.
-- Simulate a flight cancellation, hotel unavailability, transport issue, or severe weather on an itinerary item.
-- Automatically flag nearby connected segments when a simulated disruption leaves insufficient transfer time.
-- Compare simulated alternatives by estimated cost, departure timing, and remaining connection risks.
-- Choose an alternative to add a replacement item, mark the old item as replaced, and see an on-screen update message.
-- Generate context-based sample stays and transfers. Dependent replacement segments cannot depart before the upstream travel arrives. Options outside trip dates or conflicting with another booking of the same type are hidden.
-- View a persistent activity history for trip creation, disruptions, alternative selections, and check-ins.
-- See a simple low, medium, or high risk level based on unresolved disruptions, at-risk connections, and help requests.
-- Record a traveler check-in as **Safe** or **Needs help**, with an optional note.
-- View a geographic airport route map beside the itinerary timeline for flights with known airport codes.
-
-Alternatives are saved for each affected itinerary item. They are demonstration options built from that item's details; they do not represent available bookings or live prices. The connection rules use a 12-hour look-ahead and fixed minimum buffers (45–120 minutes depending on segment type). They are planning heuristics, not airline, hotel, or safety guarantees.
-
-## Run locally
-
-### Prerequisites
-
-- Java 21 or newer and Maven
-- Node.js and npm
-- A running MySQL server
-
-Create the database once in MySQL:
-
-```sql
-CREATE DATABASE tripshield;
-```
-
-Open **two PowerShell terminals** in the project root (`WT_CP`).
-
-Before the first run, open `backend/config/local.properties` and enter your MySQL password after `spring.datasource.password=`. You can change the database URL or username there too. This file is ignored by Git and Spring Boot loads it automatically when started from `backend/`. A shareable example is in `backend/config/local.properties.example`.
-
-### Terminal 1: backend
+In separate PowerShell terminals:
 
 ```powershell
 cd backend
-mvn.cmd spring-boot:run
+mvn.cmd spring-boot:run '-Dspring-boot.run.profiles=local'
 ```
-
-The default database address is `jdbc:mysql://localhost:3306/tripshield`. Keep the terminal open. To check the backend, visit `http://127.0.0.1:8080/api/health`.
-
-### Terminal 2: frontend
 
 ```powershell
 cd frontend
-npm.cmd install
+npm.cmd ci
 npm.cmd run dev
 ```
 
-Open the local URL printed by Vite, usually `http://localhost:5173`. Keep this terminal open too. On PowerShell, use `npm.cmd` if the `npm.ps1` script is blocked by the execution policy.
+Open the Vite URL (normally `http://localhost:5173`). Its `/api` proxy points to `http://127.0.0.1:8080` by default. Set `TRIPSHIELD_API_TARGET` before starting Vite to use another backend port. `GET /api/health` checks backend readiness. Use `npm.cmd` when PowerShell blocks `npm.ps1`.
 
-You only need to edit `backend/config/local.properties` once, unless your database credentials change. Do not put a real password in the tracked `application.properties` or `local.properties.example` files.
+## Roles and workflows
 
-## Accounts and new features
+**Coordinator:** sign in with the configured bootstrap account; create a trip for a registered traveler or guest; approve or reject requests; edit or cancel active trips; simulate disruptions; refresh and apply valid recovery options; inspect risk, budget totals, check-ins, notifications, and history. For a guest trip, issue a single-use invitation and share its code privately with the named traveler. A matching email alone cannot claim the trip.
 
-Before using the new interface, add these lines to the ignored `backend/config/local.properties` and restart the backend:
+**Traveler:** register, sign in, request a trip, claim an invited guest itinerary with its code, see assigned trips, check in as safe or needing help, and read notifications. Sessions use hashed bearer tokens in MySQL and expire after 12 hours or logout. Registration does not verify mailbox ownership; a private invitation code is required for an existing guest trip.
 
-```properties
-tripshield.coordinator.email=coordinator@example.com
-tripshield.coordinator.password=choose-a-strong-password
-```
+The trip wizard provides searchable airports, Duffel flight cards with price, timing, duration, stops and filters, optional sample hotel/transfer segments, a budget input, itinerary review, and route preview. Flight offers are revalidated on first save and before approval or recovery application. Expired or changed offers require a fresh search. Recovery rankings use cost, timing, and connection risk heuristics. Currencies are totaled separately without conversion. Route maps use OpenStreetMap tiles and bundled OurAirports coordinates; tile access needs a network connection.
 
-Sign in as coordinator to review booking requests, create or edit itineraries, simulate disruptions, and cancel trips. Existing trips remain in MySQL. Edit each existing trip once to add the traveler's email address. A traveler can select **Create traveler account** on the sign-in screen and register with the same email address assigned to their trips. The account is stored in MySQL with a bcrypt password hash. Travelers can search Duffel flight offers and submit a booking request for themselves from **My trips**. A coordinator approves the request before it becomes an active itinerary. TripShield does not issue a ticket, charge a payment, or reserve a hotel or vehicle. Sessions are stored in MySQL as token hashes and expire after 12 hours or sign-out.
+Help requests create a durable email outbox entry in the same transaction as the check-in. A worker sends configured SMTP alerts after commit with retries. Without SMTP, check-in remains saved and the outbox entry is skipped. In-app traveler notifications persist for approvals, rejections, cancellations, disruptions, and itinerary changes.
 
-The coordinator dashboard highlights active trips, upcoming journeys, disruptions, and help requests. The traveler dashboard shows assigned journeys and an entry point to submit a booking request. Risk and check-in controls appear only in the coordinator workspace. Cancellation keeps a trip and its history for review. To send a real email when a traveler requests help, configure `tripshield.alert.to` and the `spring.mail.*` SMTP properties shown in `backend/config/local.properties.example`. Without SMTP settings, check-ins still work and are saved, but no email is sent.
+## API
 
-## Try the demo
-
-1. Create a trip and add at least one itinerary item. Item start and end times must fall within the trip dates.
-2. Open **Trips** and select the trip from the list.
-3. Simulate a disruption on a confirmed item. The trip is marked **Needs attention**.
-4. Review the alternatives by timing, cost, and connection risk, then apply one. If a later segment remains **At risk**, open its recovery options and resolve it too. The trip returns to **On track** when no disrupted or at-risk segments remain.
-5. Try the **Route map** tab, record a traveler check-in, and review the activity history. A **Needs help** check-in keeps the trip marked **Needs attention** until it is changed to **Safe**.
-
-## API endpoints
+All endpoints except registration and login use `Authorization: Bearer <token>`. `POST /api/trips` requires a unique `Idempotency-Key` header. An identical retry returns the existing trip; reuse with different details returns 409.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/health` | Check that the backend is running |
-| POST | `/api/auth/register` | Create a traveler account |
-| POST | `/api/auth/login` | Sign in |
-| POST | `/api/auth/logout` | Sign out |
-| GET | `/api/auth/me` | Validate the current session |
-| GET | `/api/travelers` | List travelers (coordinator only) |
-| POST | `/api/flights/search` | Search Duffel economy offers |
-| GET | `/api/trips` | List trips visible to the current user |
-| POST | `/api/trips` | Create a trip or submit a traveler booking request |
-| GET | `/api/trips/{id}` | Get one trip |
-| PUT | `/api/trips/{id}` | Edit a trip (coordinator only) |
-| POST | `/api/trips/{id}/approve` | Approve a traveler booking request (coordinator only) |
-| POST | `/api/trips/{id}/cancel` | Cancel a trip (coordinator only) |
-| GET | `/api/trips/{id}/history` | Get the trip's activity history |
-| POST | `/api/trips/{id}/check-in` | Record safe or needs-help status |
-| POST | `/api/trips/{id}/disruptions` | Simulate a disruption on an item |
-| GET | `/api/trips/{id}/items/{itemId}/alternatives` | Get alternatives for a disrupted or at-risk item |
-| POST | `/api/trips/{id}/items/{itemId}/alternatives/refresh` | Refresh flight recovery offers from Duffel |
-| POST | `/api/trips/{id}/items/{itemId}/alternatives/{alternativeId}/apply` | Apply an alternative |
+| POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` | Account and session |
+| GET | `/api/auth/me` | Current session |
+| POST | `/api/auth/claim-trip` | Claim guest trip with invitation code |
+| GET | `/api/travelers` | Coordinator traveler directory |
+| POST | `/api/flights/search` | Duffel economy offer search |
+| GET, POST | `/api/trips` | Visible trips; create/request with idempotency key |
+| GET, PUT | `/api/trips/{id}` | View or coordinator edit |
+| GET | `/api/trips/{id}/history` | Actor-aware activity history |
+| POST | `/api/trips/{id}/invitation` | Coordinator issues private code |
+| POST | `/api/trips/{id}/approve`, `/reject`, `/cancel` | Review and lifecycle |
+| POST | `/api/trips/{id}/check-in` | Assigned traveler or coordinator check-in |
+| POST | `/api/trips/{id}/disruptions` | Coordinator simulation |
+| GET | `/api/trips/{id}/items/{itemId}/alternatives` | Recovery choices |
+| POST | `/api/trips/{id}/items/{itemId}/alternatives/refresh` | Refresh Duffel replacements |
+| POST | `/api/trips/{id}/items/{itemId}/alternatives/{alternativeId}/apply` | Apply recovery to itinerary |
+| GET | `/api/notifications` | Own inbox and unread count |
+| POST | `/api/notifications/{id}/read` | Mark own notification read |
 
-For a check-in, send JSON such as `{ "status": "SAFE", "note": "Reached the hotel" }` or use `"NEEDS_HELP"`. To simulate a disruption, send `{ "type": "FLIGHT_CANCELLATION", "itemId": 1 }`; other types are `HOTEL_UNAVAILABLE`, `TRANSPORT_DISRUPTION`, and `SEVERE_WEATHER`.
+Creation accepts optional `travelerUserId` for coordinator assignment, `estimatedBudget` and `budgetCurrency`; non-flight items accept `estimatedCost` and `costCurrency`. Amounts must be nonnegative and currencies use three uppercase letters. Responses group totals by currency and include `budgetExceeded`. Rejection accepts an optional JSON `comment`. New history events include actor ID, role, timestamp, action, and structured `changeJson`; legacy events retain their original fields.
 
-## Current scope
+## Migrations and tests
 
-This is a prototype using generated sample hotel and ground-transport alternatives and simulated disruptions. The route map connects airport positions and is not a live aircraft tracker. Live flight/hotel/weather integrations are not implemented. Account login and optional SMTP help-request alerts are available after local configuration. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
+`V1__legacy_schema.sql` creates legacy tables in a fresh schema. Existing nonempty schemas are baselined at V1; `V2__secure_workflows.sql` adds ownership, budget, audit, invitation, idempotency, notification, and outbox structures without deleting legacy rows. Fresh-schema migration is verified on `tripshield_test`; development-row preservation has not been independently compared before and after. See `docs/TRIPSHIELD_AUDIT.md` for the recorded development-schema startup incident.
 
-Run `npm.cmd run test`, `npm.cmd run build`, and `npm.cmd run lint` from `frontend/` for the frontend checks. A full backend test run needs Maven access to the required Surefire and JUnit artifacts.
+Backend integration tests are pinned to `jdbc:mysql://127.0.0.1:3306/tripshield_test` as `tripshield_test_app` with grants only on that schema. Store its password in ignored `backend/config/test-secrets.properties`. The test startup guard rejects another URL or user. Duffel and SMTP are mocked in automated tests.
 
-## Package lockfiles
+```powershell
+cd backend
+mvn.cmd test
+cd ../frontend
+npm.cmd run test
+npm.cmd run lint
+npm.cmd run build
+```
 
-`frontend/package-lock.json` belongs to the React app and should be kept so installs use the recorded dependency versions. The `package-lock.json` in the `WT_CP` root is an empty npm lockfile with no matching root `package.json`; the project does not need it. Run npm commands from `frontend/`.
-
-## Duffel flight search
-
-Coordinators can search economy flights for one adult from the trip editor using three-letter airport codes (for example, PNQ to DEL). Add `tripshield.duffel.token=duffel_test_...` to the ignored `backend/config/local.properties` and restart the backend. Obtain a test token from your Duffel dashboard. The token is used only by Spring Boot and must not be placed in the frontend. Without a token, flight search shows a configuration error. Flight items require a selected Duffel offer; manually entering flight details or manually creating a replacement flight is not supported.
-
-Duffel test tokens return simulated offers. A live token can return real offers on routes supported by Duffel. Selecting an offer saves its schedule, price, source, and offer ID as an itinerary snapshot. It does **not** book or pay for a ticket. Offers expire and price or availability may change. Hotel and ground-transport recovery alternatives remain simulated.
-
-## Creating a trip
-
-Coordinators use **New trip** to open the full-page planner: choose airports and travel dates, assign a registered traveler (or a guest email), search and select Duffel outbound/optional return offers, add optional seeded stay and airport transfer templates, then review the itinerary and estimated costs. Airport suggestions are a curated search aid; only the Duffel API supplies flight results. Hotel and transfer templates are planning examples, not reservations. Flight offers are checked again with Duffel when a new trip is saved, and expired offers must be searched again. The app saves an itinerary, not an airline ticket. Existing trips remain editable from the trip workspace.
-
-## Flight route map and disruption recovery
-
-Selected Duffel offers save their airport codes and flight legs. The trip workspace places a geographic route map beside the itinerary timeline, and flight selection previews it. The map is rendered with Leaflet over OpenStreetMap tiles. Airport positions use a bundled public-domain OurAirports snapshot (scheduled-service IATA airports, downloaded 10 October 2026), falling back to Duffel coordinates for unlisted airports. The map validates offer endpoints against the selected route and falls back to the direct airport pair when they disagree. Connecting lines are geographic guides, not tracked aircraft paths. Browser access to the tile server is needed for the basemap. Coordinate source: https://ourairports.com/data/.
-
-For a simulated cancellation of a Duffel flight, TripShield searches Duffel for the same route and departure date. Replacement offers show arrival delay, fare difference when currencies match, and downstream itinerary risks. Offers can expire or their prices and availability can change. Use **Refresh Duffel offers** in the recovery dialog to run a new search; once refreshed, older offers are no longer valid for that recovery search. If an offer has expired or changed, TripShield asks you to refresh and select a current offer. The backend checks the selected offer again before adding it to the itinerary. Manual flight replacements are not accepted. This workflow updates the TripShield itinerary only: it does **not** book, pay for, or change an airline ticket. Duffel test-token results are simulated. Recovery options for hotel, ground transport, and other prototype disruptions remain simulated and are labeled accordingly.
+No real payment, ticket issuance, hotel reservation, live disruption feed, mailbox verification delivery, or production load test is included. Browser acceptance and live Duffel/SMTP behavior remain unverified.

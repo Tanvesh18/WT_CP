@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import RouteMap from '../RouteMap'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+const RouteMap = lazy(() => import('../RouteMap'))
 import { formatDate, formatTime } from '../components/format'
 import { ItineraryTimeline } from '../components/ItineraryTimeline'
 import { RecoveryDialog } from '../components/RecoveryDialog'
@@ -20,6 +20,7 @@ export function TripWorkspace({ session, trips, selectedId, onSelect, onRefresh,
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [invitation, setInvitation] = useState<{ tripId: number; code: string } | null>(null)
   const selected = trips.find(trip => trip.id === selectedId) || null
   const filtered = useMemo(() => filterTrips(trips, criteria), [trips, criteria])
   useEffect(() => {
@@ -70,6 +71,16 @@ export function TripWorkspace({ session, trips, selectedId, onSelect, onRefresh,
     if (!selected || !window.confirm('Cancel trip #' + selected.id + '?')) return
     void run(async () => { await api('/trips/' + selected.id + '/cancel', { method: 'POST' }); await onRefresh(selected.id); setNotice('Trip cancelled.') })
   }
+  function reject() {
+    if (!selected) return
+    const comment = window.prompt('Reason for rejection (optional)', '')
+    if (comment === null) return
+    void run(async () => { await api('/trips/' + selected.id + '/reject', { method: 'POST', body: JSON.stringify({ comment }) }); await onRefresh(selected.id); setNotice('Request rejected.') })
+  }
+  function invite() {
+    if (!selected) return
+    void run(async () => { const result = await api<{ code: string }>('/trips/' + selected.id + '/invitation', { method: 'POST' }); setInvitation({ tripId: selected.id, code: result.code }); setNotice('Single-use invitation created. Share the code privately with the named traveler.') })
+  }
   return <div className="workspace-page">
     <div className="page-intro"><div><span className="eyebrow">JOURNEY MANAGEMENT</span><h2>{session.role === 'COORDINATOR' ? 'All trips' : 'My trips'}</h2><p>{session.role === 'TRAVELER' ? 'View your trip plans and submit a new booking request.' : 'Review itineraries, changes, and activity in one place.'}</p></div></div>
     {error && <div className="alert alert--error" role="alert">{error}</div>}
@@ -83,12 +94,16 @@ export function TripWorkspace({ session, trips, selectedId, onSelect, onRefresh,
       <section className="surface trip-detail" aria-label="Trip details">
         {selected ? <>
           <div className="trip-detail__head"><div><span className="eyebrow">TRIP #{selected.id}</span><h2>{selected.origin} <span aria-hidden="true">→</span> {selected.destination}</h2><p>{selected.traveler} · {formatDate(selected.startDate)} – {formatDate(selected.endDate)}</p></div>{session.role === 'COORDINATOR' || selected.status === 'REQUESTED' ? <StatusBadge status={selected.status}/> : null}</div>
-          {session.role === 'COORDINATOR' && selected.status === 'REQUESTED' && <div className="trip-detail__actions"><Button variant="primary" onClick={approve} disabled={busy}>Approve request</Button><Button variant="danger" onClick={cancel} disabled={busy}>Decline request</Button></div>}
-          {session.role === 'COORDINATOR' && selected.status !== 'CANCELLED' && selected.status !== 'REQUESTED' && <div className="trip-detail__actions"><Button onClick={() => onEdit(selected)}>Edit trip</Button><Button variant="danger" onClick={cancel} disabled={busy}>Cancel trip</Button></div>}
+          {session.role === 'COORDINATOR' && selected.status === 'REQUESTED' && <div className="trip-detail__actions"><Button variant="primary" onClick={approve} disabled={busy}>Approve request</Button><Button variant="danger" onClick={reject} disabled={busy}>Reject request</Button></div>}
+          {session.role === 'COORDINATOR' && selected.status !== 'CANCELLED' && selected.status !== 'REJECTED' && selected.status !== 'REQUESTED' && <div className="trip-detail__actions"><Button onClick={() => onEdit(selected)}>Edit trip</Button><Button variant="danger" onClick={cancel} disabled={busy}>Cancel trip</Button></div>}
+          {session.role === 'COORDINATOR' && !selected.ownerUserId && selected.status !== 'CANCELLED' && selected.status !== 'REJECTED' && <div className="detail-section"><Button onClick={invite} disabled={busy}>Create traveler invitation</Button>{invitation?.tripId === selected.id && <p className="invitation-code">Single-use code: <code>{invitation.code}</code></p>}</div>}
+          {selected.reviewComment && <p className="alert alert--error">Review note: {selected.reviewComment}</p>}
+          {selected.estimatedBudget != null && <p className="budget-summary">Budget: {selected.budgetCurrency} {selected.estimatedBudget} {selected.budgetExceeded && <strong> · Over budget</strong>}</p>}
+          {selected.costTotals && Object.entries(selected.costTotals).length > 0 && <p className="budget-summary">Estimated itinerary: {Object.entries(selected.costTotals).map(([currency, amount]) => `${currency} ${amount}`).join(' · ')}</p>}
           {session.role === 'COORDINATOR' && <div className="risk-note"><span className={'risk-dot risk-dot--' + selected.riskLevel.toLowerCase()}></span><strong>{selected.riskLevel.toLowerCase()} risk</strong><span>{selected.riskReason}</span></div>}
-          <div className="itinerary-map-layout"><div><div className="section-head"><div><span className="eyebrow">TRAVEL SEQUENCE</span><h3>Itinerary timeline</h3></div></div><ItineraryTimeline items={selected.items} role={session.role} cancelled={selected.status === 'CANCELLED'} busy={busy} onSimulate={simulate} onOptions={alternatives}/></div><RouteMap items={selected.items}/></div>
-          {session.role === 'COORDINATOR' && <section className="detail-section"><div className="section-head"><div><span className="eyebrow">SAFETY</span><h3>Traveler check-in</h3></div></div><p>Record your status for the travel team. A help request is saved in this app.</p><div className="checkin-status">Current: <strong>{selected.checkInStatus.replaceAll('_', ' ')}</strong>{selected.checkedInAt && <span> · {formatTime(selected.checkedInAt)}</span>}{selected.checkInNote && <span> · {selected.checkInNote}</span>}</div><label className="sr-only" htmlFor="checkin-note">Check-in note</label><input id="checkin-note" maxLength={500} placeholder="Optional note for your coordinator" value={note} onChange={e => setNote(e.target.value)}/><div className="checkin-actions"><Button disabled={busy || selected.status === 'CANCELLED'} onClick={() => checkIn('SAFE')}>Mark safe</Button><Button variant="primary" disabled={busy || selected.status === 'CANCELLED'} onClick={() => checkIn('NEEDS_HELP')}>Request help</Button></div></section>}
-          {session.role === 'COORDINATOR' && <section className="detail-section"><div className="section-head"><div><span className="eyebrow">AUDIT TRAIL</span><h3>Activity history</h3></div></div>{historyError ? <div className="alert alert--error">{historyError}</div> : history.length ? <ol className="history">{history.map(event => <li key={event.id}><time>{formatTime(event.occurredAt)}</time><strong>{event.type.replaceAll('_', ' ')}</strong><p>{event.details}</p></li>)}</ol> : <p className="muted">No activity recorded yet.</p>}</section>}
+          <div className="itinerary-map-layout"><div><div className="section-head"><div><span className="eyebrow">TRAVEL SEQUENCE</span><h3>Itinerary timeline</h3></div></div><ItineraryTimeline items={selected.items} role={session.role} cancelled={selected.status === 'CANCELLED'} busy={busy} onSimulate={simulate} onOptions={alternatives}/></div><Suspense fallback={<p role="status">Loading route map…</p>}><RouteMap items={selected.items}/></Suspense></div>
+          <section className="detail-section"><div className="section-head"><div><span className="eyebrow">SAFETY</span><h3>Traveler check-in</h3></div></div><p>Record your status for the travel team. A help request is saved in this app.</p><div className="checkin-status">Current: <strong>{selected.checkInStatus.replaceAll('_', ' ')}</strong>{selected.checkedInAt && <span> · {formatTime(selected.checkedInAt)}</span>}{selected.checkInNote && <span> · {selected.checkInNote}</span>}</div><label className="sr-only" htmlFor="checkin-note">Check-in note</label><input id="checkin-note" maxLength={255} placeholder="Optional note for your coordinator" value={note} onChange={e => setNote(e.target.value)}/><div className="checkin-actions"><Button disabled={busy || selected.status === 'CANCELLED' || selected.status === 'REJECTED' || selected.status === 'REQUESTED'} onClick={() => checkIn('SAFE')}>Mark safe</Button><Button variant="primary" disabled={busy || selected.status === 'CANCELLED' || selected.status === 'REJECTED' || selected.status === 'REQUESTED'} onClick={() => checkIn('NEEDS_HELP')}>Request help</Button></div></section>
+          <section className="detail-section"><div className="section-head"><div><span className="eyebrow">AUDIT TRAIL</span><h3>Activity history</h3></div></div>{historyError ? <div className="alert alert--error">{historyError}</div> : history.length ? <ol className="history">{history.map(event => <li key={event.id}><time>{formatTime(event.occurredAt)}</time><strong>{event.type.replaceAll('_', ' ')}</strong><p>{event.details}</p><small>{event.actorRole || 'Legacy event'}{event.actorUserId ? ` #${event.actorUserId}` : ''}</small></li>)}</ol> : <p className="muted">No activity recorded yet.</p>}</section>
         </> : <EmptyState title="Select a trip">Choose a trip to see its itinerary and activity.</EmptyState>}
       </section>
     </div>
