@@ -13,7 +13,7 @@ function load(source) {
 }
 const { validateTripDraft } = load('tripValidation.ts')
 const { filterTrips, emptyCriteria } = load('tripFilters.ts')
-const valid = { traveler: 'Ana', travelerEmail: 'ana@example.test', origin: 'Pune', destination: 'Delhi', startDate: '2026-11-10', endDate: '2026-11-12', items: [{ kind: 'FLIGHT', title: 'Flight', location: 'Pune', startsAt: '2026-11-10T09:00', endsAt: '2026-11-10T11:00' }] }
+const valid = { traveler: 'Ana', travelerEmail: 'ana@example.test', origin: 'Pune', destination: 'Delhi', startDate: '2026-11-10', endDate: '2026-11-12', items: [{ kind: 'HOTEL', title: 'Flight', location: 'Pune', startsAt: '2026-11-10T09:00', endsAt: '2026-11-10T11:00' }] }
 test('trip form accepts a valid itinerary and rejects items outside its dates', () => {
   assert.equal(validateTripDraft(valid), null)
   assert.match(validateTripDraft({ ...valid, items: [{ ...valid.items[0], endsAt: '2026-11-13T11:00' }] }), /within the trip dates/)
@@ -83,4 +83,9 @@ test('flight map falls back to selected route when offer legs disagree', () => {
   const legs = [{ origin: 'BOM', destination: 'JAI' }]
   assert.deepEqual(Array.from(routePoints(JSON.stringify(legs), 'PNQ → DEL'), point => point.code), ['PNQ', 'DEL'])
   assert.deepEqual(Array.from(routePoints(null, 'PNQ → DEL'), point => point.code), ['PNQ', 'DEL'])
+})
+
+test('manual flight segment is rejected', () => {
+  const issue = validateTripDraft({ ...valid, items: [{ ...valid.items[0], kind: 'FLIGHT' }] })
+  assert.match(issue, /selected Duffel flight offer/)
 })

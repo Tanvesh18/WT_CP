@@ -127,16 +127,7 @@ public class DisruptionPlanner {
         String route = trip.origin + " → " + trip.destination;
         int nights = (int) Math.max(1, ChronoUnit.DAYS.between(item.startsAt.toLocalDate(), item.endsAt.toLocalDate()));
         switch (item.kind) {
-            case "FLIGHT" -> {
-                if (!"SEVERE_WEATHER".equals(type)) options.add(option(trip, item, "Earlier standby flight", route, -60, -60, 13500,
-                        "Simulated earlier seat; higher fare but can protect tight connections."));
-                options.add(option(trip, item, "Direct flight rebooking", route, "SEVERE_WEATHER".equals(type) ? 180 : 90,
-                        "SEVERE_WEATHER".equals(type) ? 180 : 90, 9800,
-                        "Simulated direct replacement with standard transfer timing."));
-                options.add(option(trip, item, "Later economy flight", route, "SEVERE_WEATHER".equals(type) ? 360 : 240,
-                        "SEVERE_WEATHER".equals(type) ? 360 : 240, 6200,
-                        "Simulated lower-fare departure with a longer delay."));
-            }
+            case "FLIGHT" -> { /* Flight replacements come only from verified Duffel offers. */ }
             case "HOTEL" -> {
                 options.add(option(trip, item, "Nearby equivalent hotel", item.location, 0, 0, nights * 7200,
                         "Simulated nearby room with the original check-in window."));

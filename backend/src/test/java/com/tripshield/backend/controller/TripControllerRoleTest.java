@@ -31,7 +31,7 @@ class TripControllerRoleTest {
     private TripController.TripInput input(String email) {
         LocalDate day = LocalDate.now().plusDays(3);
         return new TripController.TripInput("Other name", email, "Pune", "Delhi", null, null, day, day.plusDays(1),
-                List.of(new TripController.ItemInput("FLIGHT", "Flight", "Pune airport", day.atTime(8, 0), day.atTime(10, 0), null, null, null, null, null)));
+                List.of(new TripController.ItemInput("HOTEL", "Stay", "Delhi", day.atTime(8, 0), day.atTime(10, 0), null, null, null, null, null)));
     }
 
     @Test void travelerCanRequestOnlyForOwnEmail() {
@@ -55,8 +55,19 @@ class TripControllerRoleTest {
     @Test void pastDepartureIsRejected() {
         LocalDate yesterday = LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).minusDays(1);
         var input = new TripController.TripInput("Asha", "asha@example.com", "Pune", "Delhi", null, null,
-                yesterday, yesterday.plusDays(1), List.of(new TripController.ItemInput("FLIGHT", "Flight", "Airport",
+                yesterday, yesterday.plusDays(1), List.of(new TripController.ItemInput("HOTEL", "Stay", "Delhi",
                 yesterday.atTime(8, 0), yesterday.atTime(10, 0), null, null, null, null, null)));
+        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create(input));
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        verifyNoInteractions(trips);
+    }
+    @Test void manualFlightIsRejected() {
+        AppUser coordinator = new AppUser(); coordinator.role = "COORDINATOR"; coordinator.email = "coordinator@example.com";
+        when(access.current()).thenReturn(coordinator);
+        LocalDate day = LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).plusDays(3);
+        var input = new TripController.TripInput("Asha", "asha@example.com", "Pune", "Delhi", null, null,
+                day, day.plusDays(1), List.of(new TripController.ItemInput("FLIGHT", "Typed flight", "Pune Airport",
+                day.atTime(8, 0), day.atTime(10, 0), null, null, null, null, null)));
         ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> controller.create(input));
         assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
         verifyNoInteractions(trips);

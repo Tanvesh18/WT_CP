@@ -20,7 +20,7 @@ The frontend sends requests to the backend under `/api`. Vite forwards those req
 - Automatically flag nearby connected segments when a simulated disruption leaves insufficient transfer time.
 - Compare simulated alternatives by estimated cost, departure timing, and remaining connection risks.
 - Choose an alternative to add a replacement item, mark the old item as replaced, and see an on-screen update message.
-- Generate context-based sample flights, stays, and transfers. Dependent replacement segments cannot depart before the upstream travel arrives. Options outside trip dates or conflicting with another booking of the same type are hidden.
+- Generate context-based sample stays and transfers. Dependent replacement segments cannot depart before the upstream travel arrives. Options outside trip dates or conflicting with another booking of the same type are hidden.
 - View a persistent activity history for trip creation, disruptions, alternative selections, and check-ins.
 - See a simple low, medium, or high risk level based on unresolved disruptions, at-risk connections, and help requests.
 - Record a traveler check-in as **Safe** or **Needs help**, with an optional note.
@@ -110,7 +110,7 @@ For a check-in, send JSON such as `{ "status": "SAFE", "note": "Reached the hote
 
 ## Current scope
 
-This is a prototype using generated sample alternatives and simulated disruptions. The route map connects airport positions and is not a live aircraft tracker. Live flight/hotel/weather integrations are not implemented. Account login and optional SMTP help-request alerts are available after local configuration. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
+This is a prototype using generated sample hotel and ground-transport alternatives and simulated disruptions. The route map connects airport positions and is not a live aircraft tracker. Live flight/hotel/weather integrations are not implemented. Account login and optional SMTP help-request alerts are available after local configuration. On-screen messages last only for the current browser session, while the activity history is stored in MySQL. The risk level is a simple rule, not a formal safety assessment.
 
 Run `npm.cmd run test`, `npm.cmd run build`, and `npm.cmd run lint` from `frontend/` for the frontend checks. A full backend test run needs Maven access to the required Surefire and JUnit artifacts.
 
@@ -120,9 +120,9 @@ Run `npm.cmd run test`, `npm.cmd run build`, and `npm.cmd run lint` from `fronte
 
 ## Duffel flight search
 
-Coordinators can search economy flights for one adult from the trip editor using three-letter airport codes (for example, PNQ to DEL). Add `tripshield.duffel.token=duffel_test_...` to the ignored `backend/config/local.properties` and restart the backend. Obtain the token from your Duffel dashboard. The token is used only by Spring Boot and must not be placed in the frontend. Without a token, search shows a configuration error; manual itinerary entry still works.
+Coordinators can search economy flights for one adult from the trip editor using three-letter airport codes (for example, PNQ to DEL). Add `tripshield.duffel.token=duffel_test_...` to the ignored `backend/config/local.properties` and restart the backend. Obtain the token from your Duffel dashboard. The token is used only by Spring Boot and must not be placed in the frontend. Without a token, flight search shows a configuration error. Flight items require a selected Duffel offer; manual flight entry is unavailable.
 
-Duffel test tokens return simulated offers. A live token can return real offers on routes supported by Duffel. Selecting an offer saves its schedule, price, source, and offer ID as an itinerary snapshot. It does **not** book or pay for a ticket. Offers expire and price or availability may change. Disruption recovery alternatives remain simulated.
+Duffel test tokens return simulated offers. A live token can return real offers on routes supported by Duffel. Selecting an offer saves its schedule, price, source, and offer ID as an itinerary snapshot. It does **not** book or pay for a ticket. Offers expire and price or availability may change. Hotel and ground-transport recovery alternatives remain simulated.
 
 ## Creating a trip
 

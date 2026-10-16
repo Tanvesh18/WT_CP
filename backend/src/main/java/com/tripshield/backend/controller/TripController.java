@@ -208,6 +208,7 @@ public class TripController {
         if (!List.of("AFFECTED", "AT_RISK").contains(affected.status)) throw badRequest("Item does not need recovery");
         Alternative option = alternatives.findById(alternativeId).orElseThrow(() -> notFound("Alternative not found"));
         if (!trip.id.equals(option.tripId) || !affected.id.equals(option.itemId)) throw badRequest("Alternative does not belong to this item");
+        if ("FLIGHT".equals(affected.kind) && option.source == null) throw badRequest("Manual flight replacements are no longer supported. Refresh Duffel offers.");
         if (option.source != null) {
             if (affected.recoverySearchId == null || !affected.recoverySearchId.equals(option.recoverySearchId))
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Replacement search has been refreshed. Choose a current offer.");
@@ -348,7 +349,8 @@ public class TripController {
     }
 
     private void flightMetadata(TripItem item, String source, String offerId, boolean verify) {
-        if (!"FLIGHT".equals(item.kind) || source == null || offerId == null) {
+        if ("FLIGHT".equals(item.kind) && (source == null || offerId == null)) throw badRequest("Choose a Duffel flight offer; manual flight entries are not supported");
+        if (!"FLIGHT".equals(item.kind)) {
             item.flightSource = null; item.flightOfferId = null; item.flightAmount = null; item.flightCurrency = null;
             item.flightExpiresAt = null; item.flightOriginTimeZone = null; item.flightDestinationTimeZone = null;
             item.flightDurationMinutes = null; item.flightStops = null; item.flightOperatingCarriers = null; item.flightRouteJson = null; return;
