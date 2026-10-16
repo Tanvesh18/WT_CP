@@ -8,13 +8,13 @@ TripShield is a college project for corporate travel planning and disruption res
 - Java 21+, Spring Boot 4, JPA, Flyway in `backend/`
 - MySQL 8 for trips, accounts, sessions, invitations, notifications, outbox jobs, and history
 
-Create a development MySQL schema named `tripshield` if needed. Copy `backend/config/local.properties.example` to ignored `backend/config/local.properties`; set the MySQL connection, coordinator bootstrap credentials, and optional Duffel/SMTP settings. Keep secrets out of Git. The **local** profile loads this file; the default profile has no datasource. Back up an existing schema before its first migration.
+Create a development MySQL schema named `tripshield` if needed. Copy `backend/config/local.properties.example` to ignored `backend/config/local.properties`; set the MySQL connection, coordinator bootstrap credentials, and optional Duffel/SMTP settings. Keep secrets out of Git. With no active profile specified, Spring Boot defaults to **local** and loads this file. Back up an existing schema before its first migration; normal backend startup may apply pending Flyway migrations.
 
 In separate PowerShell terminals:
 
 ```powershell
 cd backend
-mvn.cmd spring-boot:run '-Dspring-boot.run.profiles=local'
+mvn.cmd spring-boot:run
 ```
 
 ```powershell
@@ -65,7 +65,7 @@ Creation accepts optional `travelerUserId` for coordinator assignment, `estimate
 
 `V1__legacy_schema.sql` creates legacy tables in a fresh schema. Existing nonempty schemas are baselined at V1; `V2__secure_workflows.sql` adds ownership, budget, audit, invitation, idempotency, notification, and outbox structures without deleting legacy rows. Fresh-schema migration is verified on `tripshield_test`; development-row preservation has not been independently compared before and after. See `docs/TRIPSHIELD_AUDIT.md` for the recorded development-schema startup incident.
 
-Backend integration tests are pinned to `jdbc:mysql://127.0.0.1:3306/tripshield_test` as `tripshield_test_app` with grants only on that schema. Store its password in ignored `backend/config/test-secrets.properties`. The test startup guard rejects another URL or user. Duffel and SMTP are mocked in automated tests.
+Backend integration tests are pinned to `jdbc:mysql://127.0.0.1:3306/tripshield_test` as `tripshield_test_app` with grants only on that schema. Store its password in ignored `backend/config/test-secrets.properties`. Maven tests activate **test** explicitly, and a test-classpath startup guard rejects Spring Boot test contexts unless **test** is the only active profile and the datasource URL and user match the isolated schema. The guard runs before database beans initialize. The application also guards explicit test-profile launches. Duffel and SMTP are mocked in automated tests. `mvn.cmd test` changes only the isolated test schema; it never needs the development schema.
 
 ```powershell
 cd backend

@@ -1,5 +1,9 @@
 # TripShield repository audit
 
+## Development profile default — 2026-10-17
+
+`backend/src/main/resources/application.properties` now sets `spring.profiles.default=local`, so `mvn.cmd spring-boot:run` selects local when no active profile is supplied. Maven Surefire explicitly selects `test`, and a test-classpath `ApplicationContextInitializer` rejects Spring Boot test contexts unless `test` is the only active profile and the datasource URL and user match `tripshield_test`. A configuration-only test confirmed Spring loads the local default without opening a database connection; guard negative probes rejected a local profile, mixed test/local profiles, the development URL, and a wrong user. The selected non-database backend suite passed **18 tests, 0 failed, 0 skipped**. No database was connected to or modified in this change. The full database-backed suite and an actual development backend launch were not run, because this change was requested without modifying any database. Earlier sections describing local as an explicit profile or the base configuration as having no effective datasource are historical.
+
 ## Final release-readiness verification — 2026-10-17
 
 This section supersedes earlier readiness statements. No production code or development-database data was changed in this pass. No migration was run against `tripshield`. The only development-database access was a `START TRANSACTION READ ONLY` inspection.
