@@ -97,13 +97,19 @@ The coordinator dashboard highlights active trips, upcoming journeys, disruption
 | POST | `/api/auth/login` | Sign in |
 | POST | `/api/auth/logout` | Sign out |
 | GET | `/api/auth/me` | Validate the current session |
-| GET | `/api/trips` | List trips |
-| POST | `/api/trips` | Create a trip |
+| GET | `/api/travelers` | List travelers (coordinator only) |
+| POST | `/api/flights/search` | Search Duffel economy offers |
+| GET | `/api/trips` | List trips visible to the current user |
+| POST | `/api/trips` | Create a trip or submit a traveler booking request |
 | GET | `/api/trips/{id}` | Get one trip |
+| PUT | `/api/trips/{id}` | Edit a trip (coordinator only) |
+| POST | `/api/trips/{id}/approve` | Approve a traveler booking request (coordinator only) |
+| POST | `/api/trips/{id}/cancel` | Cancel a trip (coordinator only) |
 | GET | `/api/trips/{id}/history` | Get the trip's activity history |
 | POST | `/api/trips/{id}/check-in` | Record safe or needs-help status |
 | POST | `/api/trips/{id}/disruptions` | Simulate a disruption on an item |
 | GET | `/api/trips/{id}/items/{itemId}/alternatives` | Get alternatives for a disrupted or at-risk item |
+| POST | `/api/trips/{id}/items/{itemId}/alternatives/refresh` | Refresh flight recovery offers from Duffel |
 | POST | `/api/trips/{id}/items/{itemId}/alternatives/{alternativeId}/apply` | Apply an alternative |
 
 For a check-in, send JSON such as `{ "status": "SAFE", "note": "Reached the hotel" }` or use `"NEEDS_HELP"`. To simulate a disruption, send `{ "type": "FLIGHT_CANCELLATION", "itemId": 1 }`; other types are `HOTEL_UNAVAILABLE`, `TRANSPORT_DISRUPTION`, and `SEVERE_WEATHER`.
@@ -120,7 +126,7 @@ Run `npm.cmd run test`, `npm.cmd run build`, and `npm.cmd run lint` from `fronte
 
 ## Duffel flight search
 
-Coordinators can search economy flights for one adult from the trip editor using three-letter airport codes (for example, PNQ to DEL). Add `tripshield.duffel.token=duffel_test_...` to the ignored `backend/config/local.properties` and restart the backend. Obtain the token from your Duffel dashboard. The token is used only by Spring Boot and must not be placed in the frontend. Without a token, flight search shows a configuration error. Flight items require a selected Duffel offer; manual flight entry is unavailable.
+Coordinators can search economy flights for one adult from the trip editor using three-letter airport codes (for example, PNQ to DEL). Add `tripshield.duffel.token=duffel_test_...` to the ignored `backend/config/local.properties` and restart the backend. Obtain a test token from your Duffel dashboard. The token is used only by Spring Boot and must not be placed in the frontend. Without a token, flight search shows a configuration error. Flight items require a selected Duffel offer; manually entering flight details or manually creating a replacement flight is not supported.
 
 Duffel test tokens return simulated offers. A live token can return real offers on routes supported by Duffel. Selecting an offer saves its schedule, price, source, and offer ID as an itinerary snapshot. It does **not** book or pay for a ticket. Offers expire and price or availability may change. Hotel and ground-transport recovery alternatives remain simulated.
 
@@ -132,4 +138,4 @@ Coordinators use **New trip** to open the full-page planner: choose airports and
 
 Selected Duffel offers save their airport codes and flight legs. The trip workspace places a geographic route map beside the itinerary timeline, and flight selection previews it. The map is rendered with Leaflet over OpenStreetMap tiles. Airport positions use a bundled public-domain OurAirports snapshot (scheduled-service IATA airports, downloaded 10 October 2026), falling back to Duffel coordinates for unlisted airports. The map validates offer endpoints against the selected route and falls back to the direct airport pair when they disagree. Connecting lines are geographic guides, not tracked aircraft paths. Browser access to the tile server is needed for the basemap. Coordinate source: https://ourairports.com/data/.
 
-For a simulated cancellation of a Duffel flight, TripShield searches Duffel again for the flight route and departure date. Replacement offers show arrival delay, fare difference when currencies match, and downstream itinerary risks. Refreshing starts a new search and makes older offers inapplicable. The backend verifies an offer again before adding it as an itinerary replacement. This does **not** book, pay for, or change an airline ticket. Duffel test-token results remain simulated. Recovery options for hotel, ground transport, and other prototype disruptions remain simulated and are labeled accordingly.
+For a simulated cancellation of a Duffel flight, TripShield searches Duffel for the same route and departure date. Replacement offers show arrival delay, fare difference when currencies match, and downstream itinerary risks. Offers can expire or their prices and availability can change. Use **Refresh Duffel offers** in the recovery dialog to run a new search; once refreshed, older offers are no longer valid for that recovery search. If an offer has expired or changed, TripShield asks you to refresh and select a current offer. The backend checks the selected offer again before adding it to the itinerary. Manual flight replacements are not accepted. This workflow updates the TripShield itinerary only: it does **not** book, pay for, or change an airline ticket. Duffel test-token results are simulated. Recovery options for hotel, ground transport, and other prototype disruptions remain simulated and are labeled accordingly.
