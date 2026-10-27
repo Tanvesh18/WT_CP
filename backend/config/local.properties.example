@@ -17,3 +17,5 @@ tripshield.coordinator.password=change-this-password
 
 # Optional Duffel flight search. Create a test token in Duffel first. Keep this file private.
 # tripshield.duffel.token=
+# Optional: force clearly labeled offline demo flights even when a Duffel token is configured.
+# tripshield.demo.flights=true

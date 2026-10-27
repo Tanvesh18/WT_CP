@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import type { ItemDraft, Kind, Trip, TripDraft } from '../types'
 import { Button, Modal } from '../components/ui'
 import { validateTripDraft } from '../services/tripValidation'
+import { flightSourceLabel } from '../services/flightOffers'
 import { FlightSearch, type FlightOffer } from '../components/FlightSearch'
 
 const localToday = () => { const date = new Date(); return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-') }
@@ -46,7 +47,7 @@ export function TripEditor({ trip, onClose, onSave, busy, error }: { trip: Trip 
       {draft.items.map((item, index) => <fieldset className="item-editor" key={item.id ?? 'new-' + index}>
         <legend>Segment {index + 1}</legend>
         {draft.items.length > 1 && <Button type="button" variant="quiet" className="item-editor__remove" onClick={() => setDraft(current => ({ ...current, items: current.items.filter((_, i) => i !== index) }))}>Remove</Button>}
-        {item.kind === 'FLIGHT' && <div className="item-editor__flight"><Button type="button" onClick={() => setSearchIndex(searchIndex === index ? null : index)}>{searchIndex === index ? 'Close flight search' : 'Find Duffel flights'}</Button>{item.flightSource && <p className="form-help">{item.flightSource === 'DUFFEL_TEST' ? 'Duffel test offer' : 'Duffel live offer'} · {item.flightCurrency} {item.flightAmount}. Saved as itinerary only; no ticket is booked.</p>}{!item.flightOfferId && <p className="form-help">Choose a Duffel offer to add a flight. Manual flight details are not accepted.</p>}{searchIndex === index && <FlightSearch date={draft.startDate} onSelect={offer => selectFlight(index, offer)} />}</div>}
+        {item.kind === 'FLIGHT' && <div className="item-editor__flight"><Button type="button" onClick={() => setSearchIndex(searchIndex === index ? null : index)}>{searchIndex === index ? 'Close flight search' : 'Find flights'}</Button>{item.flightSource && <p className="form-help">{flightSourceLabel(item.flightSource)} · {item.flightCurrency} {item.flightAmount}. Saved as itinerary only; no ticket is booked.</p>}{!item.flightOfferId && <p className="form-help">Choose a flight schedule to add a flight. Manual flight details are not accepted.</p>}{searchIndex === index && <FlightSearch date={draft.startDate} onSelect={offer => selectFlight(index, offer)} />}</div>}
         <div className="form-grid">
           <label>Type<select value={item.kind} onChange={e => itemField(index, 'kind', e.target.value as Kind)}><option value="FLIGHT">Flight</option><option value="HOTEL">Hotel</option><option value="TRANSPORT">Ground transport</option></select></label>
           <label>Title<input required readOnly={item.kind === 'FLIGHT'} value={item.title} onChange={e => itemField(index, 'title', e.target.value)} placeholder={item.kind === 'FLIGHT' ? 'Flight AI 401' : item.kind === 'HOTEL' ? 'Hotel reservation' : 'Airport transfer'} /></label>

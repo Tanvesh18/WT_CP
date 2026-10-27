@@ -255,7 +255,7 @@ public class TripController {
         trips.save(trip);
         event(trip.id, item.id, "DISRUPTION", item.changeNote + " affected " + item.title + "; " + impacted.size() + " later segment(s) at risk", Map.of("type", type, "impactedCount", impacted.size()));
         notifications.add(trip, "DISRUPTION", "A simulated disruption affects " + item.title + ".");
-        String searchMessage = "FLIGHT_CANCELLATION".equals(type) && item.flightSource != null ? refreshDuffelAlternatives(trip, item) : null;
+        String searchMessage = "FLIGHT".equals(item.kind) && item.flightSource != null ? refreshFlightAlternatives(trip, item) : null;
         return impact(trip, item, searchMessage);
     }
 
@@ -271,9 +271,9 @@ public class TripController {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ImpactView refreshFlightOptions(@PathVariable Long id, @PathVariable Long itemId) {
         access.coordinator(); Trip trip = findForUpdate(id); if ("CANCELLED".equals(trip.lifecycle) || "REQUESTED".equals(trip.lifecycle)) throw badRequest("Trip is not active"); TripItem item = item(trip, itemId);
-        if (!"AFFECTED".equals(item.status) || !"FLIGHT_CANCELLATION".equals(item.disruptionType) || item.flightSource == null)
-            throw badRequest("Duffel replacement search is available for cancelled Duffel flights");
-        return impact(trip, item, refreshDuffelAlternatives(trip, item));
+        if (!"AFFECTED".equals(item.status) || !List.of("FLIGHT_CANCELLATION", "SEVERE_WEATHER").contains(item.disruptionType) || item.flightSource == null)
+            throw badRequest("Replacement search is available for disrupted flights");
+        return impact(trip, item, refreshFlightAlternatives(trip, item));
     }
 
     @PostMapping("/{id}/items/{itemId}/alternatives/{alternativeId}/apply")
@@ -285,7 +285,7 @@ public class TripController {
         if (!List.of("AFFECTED", "AT_RISK").contains(affected.status)) throw badRequest("Item does not need recovery");
         Alternative option = alternatives.findById(alternativeId).orElseThrow(() -> notFound("Alternative not found"));
         if (!trip.id.equals(option.tripId) || !affected.id.equals(option.itemId)) throw badRequest("Alternative does not belong to this item");
-        if ("FLIGHT".equals(affected.kind) && option.source == null) throw badRequest("Manual flight replacements are no longer supported. Refresh Duffel offers.");
+        if ("FLIGHT".equals(affected.kind) && option.source == null) throw badRequest("Choose a verified demo or Duffel flight replacement.");
         if (option.source != null) {
             if (affected.recoverySearchId == null || !affected.recoverySearchId.equals(option.recoverySearchId))
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Replacement search has been refreshed. Choose a current offer.");
@@ -328,7 +328,7 @@ public class TripController {
         Trip saved = trips.saveAndFlush(trip);
         event(saved.id, affected.id, "ALTERNATIVE_APPLIED",
                 option.title + " replaced " + affected.title + "; " + remainingRisk.size() + " later segment(s) still need attention"
-                + (option.source == null ? "" : "; Duffel offer added to itinerary only, no ticket booked"), Map.of("alternativeId", option.id, "remainingRisk", remainingRisk.size()));
+                + (option.source == null ? "" : "; flight schedule added to itinerary only, no ticket booked"), Map.of("alternativeId", option.id, "remainingRisk", remainingRisk.size()));
         notifications.add(saved, "ITINERARY_CHANGED", "A recovery option was added to your itinerary.");
         return view(saved);
     }
@@ -336,8 +336,8 @@ public class TripController {
     private ImpactView impact(Trip trip, TripItem item) { return impact(trip, item, null); }
     private ImpactView impact(Trip trip, TripItem item, String searchMessage) {
         List<Alternative> options = alternatives.findByTripIdAndItemId(trip.id, item.id);
-        boolean duffelRecovery = "FLIGHT".equals(item.kind) && "FLIGHT_CANCELLATION".equals(item.disruptionType) && item.flightSource != null;
-        if (!duffelRecovery && options.stream().noneMatch(option -> planner.fits(trip, item, option))) {
+        boolean offerRecovery = "FLIGHT".equals(item.kind) && item.flightSource != null;
+        if (!offerRecovery && options.stream().noneMatch(option -> planner.fits(trip, item, option))) {
             String type = item.disruptionType == null ? "CONNECTION_RISK" : item.disruptionType;
             List<Alternative> existing = options;
             List<Alternative> fresh = planner.generate(trip, item, type).stream()
@@ -349,7 +349,7 @@ public class TripController {
                 options.addAll(alternatives.saveAll(fresh));
             }
         }
-        List<OptionView> valid = options.stream().filter(option -> !duffelRecovery || option.source != null)
+        List<OptionView> valid = options.stream().filter(option -> !offerRecovery || option.source != null)
                 .filter(option -> option.source == null || item.recoverySearchId != null && item.recoverySearchId.equals(option.recoverySearchId))
                 .filter(option -> option.source == null || offerCurrent(option)).filter(option -> planner.fits(trip, item, option))
                 .map(option -> planner.describe(trip, item, option))
@@ -365,25 +365,38 @@ public class TripController {
         return new ImpactView(message, itemView(item), impacted, valid, searchMessage);
     }
 
-    private String refreshDuffelAlternatives(Trip trip, TripItem item) {
+    private String refreshFlightAlternatives(Trip trip, TripItem item) {
         item.recoverySearchId = java.util.UUID.randomUUID().toString();
         String[] route = item.location == null ? new String[0] : item.location.split(" → ");
         if (route.length != 2 || !route[0].matches("[A-Z]{3}") || !route[1].matches("[A-Z]{3}"))
             return "This flight has no searchable airport route.";
-        if (item.startsAt.toLocalDate().isBefore(LocalDate.now())) return "Past flights cannot be searched in Duffel.";
+        if (item.startsAt.toLocalDate().isBefore(LocalDate.now())) return "Past flights cannot be searched for replacements.";
         try {
-            List<FlightController.FlightOffer> offers = flights.searchOffers(route[0], route[1], item.startsAt.toLocalDate()).offers();
+            FlightController.SearchResult search = flights.searchOffers(route[0], route[1], item.startsAt.toLocalDate());
+            java.time.Instant earliestDeparture = flightInstant(item.startsAt, item.flightOriginTimeZone)
+                    .plus(java.time.Duration.ofMinutes("SEVERE_WEATHER".equals(item.disruptionType) ? planner.assumedDelay("SEVERE_WEATHER") : 1));
+            List<FlightController.FlightOffer> offers = new java.util.ArrayList<>(search.offers());
+            String searchMode = search.mode();
+            if (offers.stream().noneMatch(value -> !value.id().equals(item.flightOfferId)
+                    && !flightInstant(value.departingAt(), value.originTimeZone()).isBefore(earliestDeparture))
+                    && item.startsAt.toLocalDate().isBefore(trip.endDate)) {
+                FlightController.SearchResult nextDay = flights.searchOffers(route[0], route[1], item.startsAt.toLocalDate().plusDays(1));
+                offers.addAll(nextDay.offers());
+                if ("DEMO".equals(nextDay.mode())) searchMode = "DEMO";
+            }
             List<Alternative> saved = alternatives.findByTripIdAndItemId(trip.id, item.id);
             int count = 0;
             for (FlightController.FlightOffer offer : offers.stream()
                     .filter(value -> !value.id().equals(item.flightOfferId))
+                    .filter(value -> !flightInstant(value.departingAt(), value.originTimeZone()).isBefore(earliestDeparture))
                     .sorted(Comparator.comparing(FlightController.FlightOffer::arrivingAt)
                             .thenComparing(value -> new java.math.BigDecimal(value.totalAmount())))
                     .limit(12).toList()) {
                 Alternative option = saved.stream().filter(value -> offer.id().equals(value.flightOfferId)).findFirst().orElse(null);
                 if (option == null) option = new Alternative(trip.id, item.id, "FLIGHT", offer.title(),
                         offer.origin() + " → " + offer.destination(), flightLocalTime(offer.departingAt(), offer.originTimeZone()),
-                        flightLocalTime(offer.arrivingAt(), offer.destinationTimeZone()), offer.totalAmount(), "Duffel offer for the cancelled route; itinerary planning only.");
+                        flightLocalTime(offer.arrivingAt(), offer.destinationTimeZone()), offer.totalAmount(),
+                        "DEMO".equals(offer.source()) ? "Simulated replacement schedule; no seat or booking exists." : "Duffel offer for the disrupted route; itinerary planning only.");
                 option.kind = "FLIGHT"; option.title = offer.title(); option.location = offer.origin() + " → " + offer.destination();
                 option.startsAt = flightLocalTime(offer.departingAt(), offer.originTimeZone()); option.endsAt = flightLocalTime(offer.arrivingAt(), offer.destinationTimeZone());
                 option.estimatedCost = new java.math.BigDecimal(offer.totalAmount()); option.source = offer.source(); option.currency = offer.totalCurrency();
@@ -400,7 +413,9 @@ public class TripController {
                         ? option.estimatedCost.subtract(new java.math.BigDecimal(item.flightAmount)) : null;
                 if (planner.fits(trip, item, option)) { alternatives.save(option); count++; }
             }
-            return count == 0 ? "Duffel returned no usable replacement offers for this route and trip window." : count + " Duffel replacement offer(s) found. Prices and availability can change.";
+            return count == 0 ? "No usable replacement flights fit this route, disruption delay, and trip window."
+                    : count + ("DEMO".equals(searchMode) ? " simulated replacement schedule(s) found. These are planning examples, not airline availability."
+                    : " Duffel replacement offer(s) found. Prices and availability can change.");
         } catch (org.springframework.web.server.ResponseStatusException ex) {
             return "Duffel replacement search unavailable: " + ex.getReason();
         } catch (Exception ex) {
@@ -431,13 +446,13 @@ public class TripController {
     }
 
     private void flightMetadata(TripItem item, String source, String offerId, boolean verify) {
-        if ("FLIGHT".equals(item.kind) && (source == null || offerId == null)) throw badRequest("Choose a Duffel flight offer; manual flight entries are not supported");
+        if ("FLIGHT".equals(item.kind) && (source == null || offerId == null)) throw badRequest("Choose a demo or Duffel flight offer; manual flight entries are not supported");
         if (!"FLIGHT".equals(item.kind)) {
             item.flightSource = null; item.flightOfferId = null; item.flightAmount = null; item.flightCurrency = null;
             item.flightExpiresAt = null; item.flightOriginTimeZone = null; item.flightDestinationTimeZone = null;
             item.flightDurationMinutes = null; item.flightStops = null; item.flightOperatingCarriers = null; item.flightRouteJson = null; return;
         }
-        if (!List.of("DUFFEL_TEST", "DUFFEL_LIVE").contains(source)) throw badRequest("Invalid flight source");
+        if (!List.of("DEMO", "DUFFEL_TEST", "DUFFEL_LIVE").contains(source)) throw badRequest("Invalid flight source");
         if (!verify && offerId.equals(item.flightOfferId) && source.equals(item.flightSource)) return;
         FlightController.FlightOffer offer = flights.verifiedOffer(offerId);
         if (!offerId.equals(offer.id())) throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight offer ID changed. Search again.");

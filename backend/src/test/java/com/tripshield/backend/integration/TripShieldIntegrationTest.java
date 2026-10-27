@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.tripshield.backend.controller.FlightController;
+import com.tripshield.backend.controller.DemoFlights;
 import com.tripshield.backend.model.Alternative;
 import com.tripshield.backend.repository.AlternativeRepository;
 import com.tripshield.backend.repository.TripEventRepository;
@@ -75,6 +76,7 @@ class TripShieldIntegrationTest {
     @Autowired UserNotificationRepository notifications;
     @Autowired NotificationOutboxRepository outbox;
     @Autowired EmailAlerts emailAlerts;
+    @Autowired DemoFlights demoFlights;
 
     @MockitoSpyBean FlightController flights;
     @MockitoBean JavaMailSender mailSender;
@@ -289,11 +291,113 @@ class TripShieldIntegrationTest {
     }
 
     @Test
+    void offlineWeatherFlightRecoveryUpdatesTravelerAndRejectsDuplicateApply() throws Exception {
+        String coordinator = coordinatorToken();
+        String travelerEmail = email();
+        String traveler = register(travelerEmail);
+        LocalDate departure = LocalDate.now().plusDays(3);
+        List<FlightController.FlightOffer> demo = demoFlights.search("PNQ", "DEL", departure);
+        assertEquals(5, demo.size());
+        var original = demo.getFirst();
+        Map<String, Object> flight = Map.of("kind", "FLIGHT", "title", original.title(), "location", "PNQ → DEL",
+                "startsAt", OffsetDateTime.parse(original.departingAt()).toLocalDateTime().toString(),
+                "endsAt", OffsetDateTime.parse(original.arrivingAt()).toLocalDateTime().toString(),
+                "flightSource", "DEMO", "flightOfferId", original.id());
+        String trip = json(Map.of("traveler", "Test Traveler", "travelerEmail", travelerEmail,
+                "origin", "Pune", "destination", "Delhi", "originAirportCode", "PNQ", "destinationAirportCode", "DEL",
+                "startDate", departure.toString(), "endDate", departure.plusDays(1).toString(), "items", List.of(flight)));
+        long tripId = body(mvc.perform(post("/api/trips").header("Idempotency-Key", UUID.randomUUID().toString())
+                .header("Authorization", bearer(traveler)).contentType(MediaType.APPLICATION_JSON).content(trip))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.items[0].flightSource").value("DEMO")).andReturn()).path("id").asLong();
+        mvc.perform(post("/api/trips/{id}/approve", tripId).header("Authorization", bearer(coordinator)))
+                .andExpect(status().isOk());
+        long itemId = trips.findById(tripId).orElseThrow().items.getFirst().id;
+        mvc.perform(post("/api/trips/{id}/disruptions", tripId).header("Authorization", bearer(traveler))
+                .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("type", "SEVERE_WEATHER", "itemId", itemId))))
+                .andExpect(status().isForbidden());
+        MvcResult weather = mvc.perform(post("/api/trips/{id}/disruptions", tripId)
+                .header("Authorization", bearer(coordinator)).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("type", "SEVERE_WEATHER", "itemId", itemId))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.affectedItem.status").value("AFFECTED"))
+                .andExpect(jsonPath("$.alternatives[0].source").value("DEMO")).andReturn();
+        long alternativeId = body(weather).path("alternatives").get(0).path("id").asLong();
+        assertTrue(body(weather).path("alternatives").get(0).path("startsAt").asText().compareTo(departure + "T10:15:00") >= 0);
+        int initialOptions = alternatives.findByTripIdAndItemId(tripId, itemId).size();
+        mvc.perform(post("/api/trips/{id}/items/{itemId}/alternatives/refresh", tripId, itemId)
+                .header("Authorization", bearer(coordinator))).andExpect(status().isOk());
+        assertEquals(initialOptions, alternatives.findByTripIdAndItemId(tripId, itemId).size());
+        mvc.perform(post("/api/trips/{id}/items/{itemId}/alternatives/{alternativeId}/apply", tripId, itemId, alternativeId)
+                .header("Authorization", bearer(coordinator)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[1].flightSource").value("DEMO"));
+        mvc.perform(post("/api/trips/{id}/items/{itemId}/alternatives/{alternativeId}/apply", tripId, itemId, alternativeId)
+                .header("Authorization", bearer(coordinator))).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/notifications").header("Authorization", bearer(traveler)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[*].type", hasItem("DISRUPTION")))
+                .andExpect(jsonPath("$.items[*].type", hasItem("ITINERARY_CHANGED")));
+    }
+
+    @Test
+    void transportAndHotelWeatherDisruptionsProduceSimulatedRecovery() throws Exception {
+        String coordinator = coordinatorToken();
+        LocalDate departure = LocalDate.now().plusDays(3);
+        for (String kind : List.of("TRANSPORT", "HOTEL")) {
+            Map<String, Object> segment = Map.of("kind", kind, "title", kind + " planning segment", "location", "Delhi",
+                    "startsAt", departure + "T09:00:00", "endsAt", kind.equals("HOTEL")
+                            ? departure.plusDays(1) + "T11:00:00" : departure + "T10:00:00");
+            String trip = json(Map.of("traveler", "Test Traveler", "travelerEmail", email(), "origin", "Pune",
+                    "destination", "Delhi", "startDate", departure.toString(), "endDate", departure.plusDays(2).toString(),
+                    "items", List.of(segment)));
+            long tripId = body(mvc.perform(post("/api/trips").header("Idempotency-Key", UUID.randomUUID().toString())
+                    .header("Authorization", bearer(coordinator)).contentType(MediaType.APPLICATION_JSON).content(trip))
+                    .andExpect(status().isCreated()).andReturn()).path("id").asLong();
+            long itemId = trips.findById(tripId).orElseThrow().items.getFirst().id;
+            String type = kind.equals("HOTEL") ? "HOTEL_UNAVAILABLE" : "TRANSPORT_DISRUPTION";
+            MvcResult issue = mvc.perform(post("/api/trips/{id}/disruptions", tripId)
+                    .header("Authorization", bearer(coordinator)).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(Map.of("type", type, "itemId", itemId))))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.alternatives[0].kind").value(kind)).andReturn();
+            long choice = body(issue).path("alternatives").get(0).path("id").asLong();
+            mvc.perform(post("/api/trips/{id}/items/{itemId}/alternatives/{alternativeId}/apply", tripId, itemId, choice)
+                    .header("Authorization", bearer(coordinator))).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items", hasSize(2)));
+        }
+        long weatherTrip = createTrip(coordinator, email(), "Weather hotel");
+        long weatherItem = trips.findById(weatherTrip).orElseThrow().items.getFirst().id;
+        mvc.perform(post("/api/trips/{id}/disruptions", weatherTrip)
+                .header("Authorization", bearer(coordinator)).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("type", "SEVERE_WEATHER", "itemId", weatherItem))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.alternatives[0].kind").value("HOTEL"));
+    }
+
+    @Test
+    void lateDemoFlightCanRecoverOnNextDayWithinTripWindow() throws Exception {
+        String coordinator = coordinatorToken();
+        LocalDate departure = LocalDate.now().plusDays(3);
+        var late = demoFlights.search("PNQ", "DEL", departure).getLast();
+        Map<String, Object> flight = Map.of("kind", "FLIGHT", "title", late.title(), "location", "PNQ → DEL",
+                "startsAt", OffsetDateTime.parse(late.departingAt()).toLocalDateTime().toString(),
+                "endsAt", OffsetDateTime.parse(late.arrivingAt()).toLocalDateTime().toString(),
+                "flightSource", "DEMO", "flightOfferId", late.id());
+        String trip = json(Map.of("traveler", "Test Traveler", "travelerEmail", email(), "origin", "Pune",
+                "destination", "Delhi", "originAirportCode", "PNQ", "destinationAirportCode", "DEL",
+                "startDate", departure.toString(), "endDate", departure.plusDays(1).toString(), "items", List.of(flight)));
+        long tripId = body(mvc.perform(post("/api/trips").header("Idempotency-Key", UUID.randomUUID().toString())
+                .header("Authorization", bearer(coordinator)).contentType(MediaType.APPLICATION_JSON).content(trip))
+                .andExpect(status().isCreated()).andReturn()).path("id").asLong();
+        long itemId = trips.findById(tripId).orElseThrow().items.getFirst().id;
+        mvc.perform(post("/api/trips/{id}/disruptions", tripId).header("Authorization", bearer(coordinator))
+                .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("type", "SEVERE_WEATHER", "itemId", itemId))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.alternatives[0].source").value("DEMO"))
+                .andExpect(jsonPath("$.alternatives[0].startsAt").value(departure.plusDays(1) + "T06:15:00"));
+    }
+
+    @Test
     void offsetBearingDuffelTimestampsPersistAsCorrectAirportLocalTimes() throws Exception {
         String coordinator = coordinatorToken();
         LocalDate departure = LocalDate.now().plusDays(3);
         var offer = new FlightController.FlightOffer("off_offset123", "DUFFEL_TEST", "Offset Air", "PNQ", "LHR",
-                departure + "T08:00:00+05:30", departure + "T07:30:00+01:00", "Asia/Kolkata", "Europe/London",
+                departure + "T08:00:00+05:30", departure.atTime(7, 30).atZone(ZoneId.of("Europe/London")).toOffsetDateTime().toString(), "Asia/Kolkata", "Europe/London",
                 "5000.00", "INR", "2030-01-04T00:00:00Z", 0, 240, "Offset Air", List.of());
         doReturn(offer).when(flights).verifiedOffer("off_offset123");
         Map<String, Object> flightItem = Map.of("kind", "FLIGHT", "title", "Offset flight", "location", "PNQ → LHR",

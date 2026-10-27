@@ -10,7 +10,7 @@ export function validateTripDraft(draft: TripDraft): string | null {
   if (!draft.items.length) return 'Add at least one itinerary segment.'
   for (const [index, item] of draft.items.entries()) {
     const label = 'Segment ' + (index + 1)
-    if (item.kind === 'FLIGHT' && (!item.flightSource || !item.flightOfferId)) return label + ' needs a selected Duffel flight offer.'
+    if (item.kind === 'FLIGHT' && (!item.flightSource || !item.flightOfferId)) return label + ' needs a selected flight schedule.'
     if (!item.title.trim() || !item.location.trim() || !item.startsAt || !item.endsAt) return label + ' needs a title, location, start, and end.'
     if (item.endsAt <= item.startsAt) return label + ' must end after it starts.'
     if (item.startsAt.slice(0, 10) < draft.startDate || item.endsAt.slice(0, 10) > draft.endDate) return label + ' must fit within the trip dates.'

@@ -127,7 +127,7 @@ public class DisruptionPlanner {
         String route = trip.origin + " → " + trip.destination;
         int nights = (int) Math.max(1, ChronoUnit.DAYS.between(item.startsAt.toLocalDate(), item.endsAt.toLocalDate()));
         switch (item.kind) {
-            case "FLIGHT" -> { /* Flight replacements come only from verified Duffel offers. */ }
+            case "FLIGHT" -> { /* Flight replacements come from validated demo schedules or Duffel offers. */ }
             case "HOTEL" -> {
                 options.add(option(trip, item, "Nearby equivalent hotel", item.location, 0, 0, nights * 7200,
                         "Simulated nearby room with the original check-in window."));

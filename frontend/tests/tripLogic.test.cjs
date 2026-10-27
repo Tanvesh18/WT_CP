@@ -87,5 +87,5 @@ test('flight map falls back to selected route when offer legs disagree', () => {
 
 test('manual flight segment is rejected', () => {
   const issue = validateTripDraft({ ...valid, items: [{ ...valid.items[0], kind: 'FLIGHT' }] })
-  assert.match(issue, /selected Duffel flight offer/)
+  assert.match(issue, /selected flight schedule/)
 })

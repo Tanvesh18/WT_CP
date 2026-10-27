@@ -28,9 +28,14 @@ public class FlightController {
     private final Access access;
     private final ObjectMapper mapper;
     private final String token;
+    private final DemoFlights demoFlights;
+    private final boolean demoOnly;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
-    public FlightController(Access access, ObjectMapper mapper, @Value("${tripshield.duffel.token:}") String token) {
-        this.access = access; this.mapper = mapper; this.token = token.trim();
+    public FlightController(Access access, ObjectMapper mapper, DemoFlights demoFlights,
+            @Value("${tripshield.duffel.token:}") String token,
+            @Value("${tripshield.demo.flights:false}") boolean demoOnly) {
+        this.access = access; this.mapper = mapper; this.demoFlights = demoFlights;
+        this.token = token.trim(); this.demoOnly = demoOnly;
     }
     public record SearchInput(@NotNull @Pattern(regexp = "[A-Z]{3}") String origin,
             @NotNull @Pattern(regexp = "[A-Z]{3}") String destination,
@@ -54,7 +59,7 @@ public class FlightController {
 
     public SearchResult searchOffers(String origin, String destination, LocalDate departureDate) {
         if (origin.equals(destination)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose different airports");
-        requireToken();
+        if (demoOnly || token.isBlank()) return new SearchResult("DEMO", demoFlights.search(origin, destination, departureDate));
         try {
             byte[] body = mapper.writeValueAsBytes(Map.of("data", Map.of(
                 "slices", List.of(Map.of("origin", origin, "destination", destination, "departure_date", departureDate.toString())),
@@ -67,11 +72,19 @@ public class FlightController {
                 if (result.size() == 30) break;
             }
             return new SearchResult(token.startsWith("duffel_test_") ? "TEST" : "LIVE", result);
-        } catch (ResponseStatusException ex) { throw ex; }
-        catch (Exception ex) { throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Duffel search is unavailable. Try again later."); }
+        } catch (ResponseStatusException ex) {
+            if (ex.getStatusCode().value() == 400) throw ex;
+            return new SearchResult("DEMO", demoFlights.search(origin, destination, departureDate));
+        }
+        catch (Exception ex) { return new SearchResult("DEMO", demoFlights.search(origin, destination, departureDate)); }
     }
 
     public FlightOffer verifiedOffer(String id) {
+        if (id != null && id.startsWith("demo_")) {
+            FlightOffer offer = demoFlights.find(id);
+            if (offer == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "Demo flight expired or unavailable. Search again.");
+            return offer;
+        }
         requireToken();
         if (id == null || !id.matches("off_[A-Za-z0-9]+")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid Duffel offer ID");
         try {

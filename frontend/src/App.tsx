@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import './App.css'
+import './design.css'
 import { AppShell, type View } from './components/AppShell'
 import { AccountTools } from './components/AccountTools'
 import { useSession } from './hooks/useSession'

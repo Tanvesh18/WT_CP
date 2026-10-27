@@ -1,5 +1,5 @@
 export type Airport = { code: string; city: string; name: string; country: string }
-// Search aid only. Flight availability always comes from Duffel.
+// Search aid only. Flight results are Duffel offers or clearly labeled offline demo schedules.
 export const airports: Airport[] = [
   ['DEL','New Delhi','Indira Gandhi International','India'], ['BOM','Mumbai','Chhatrapati Shivaji Maharaj International','India'],
   ['BLR','Bengaluru','Kempegowda International','India'], ['HYD','Hyderabad','Rajiv Gandhi International','India'],

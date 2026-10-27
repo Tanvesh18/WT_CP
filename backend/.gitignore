@@ -33,3 +33,5 @@ build/
 ### VS Code ###
 .vscode/
 /config/test-secrets.properties
+/config/demo-secrets.properties
+/config/test-preservation.sql
