@@ -19,6 +19,10 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .58; }
 :where(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #19a8a6; outline-offset: 3px; }
 .eyebrow { color: #327779; font-size: 11px; letter-spacing: .11em; }
+.demo-login-hint { display: grid; gap: 4px; margin: -10px 0 22px; padding: 12px 14px; border: 1px solid #b9dcd4; border-radius: 9px; background: #f0f8f5; font-size: 12px; }
+.demo-login-hint strong { color: var(--teal-deep); }
+.demo-login-hint span { font-weight: 700; overflow-wrap: anywhere; }
+.demo-login-hint small { color: var(--muted); line-height: 1.4; }
 .button { border-radius: 9px; min-height: 40px; font-size: 13px; }
 .button--primary { box-shadow: 0 3px 8px #086d701e; }
 .surface, .overview-metric, .wizard-panel, .flight-picker { border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -68,8 +72,13 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .overview-route { font-size: 15px; }
 .overview-row small, .overview-row em { font-size: 12px; }
 .overview-brief p, .detail-section>p { font-size: 13px; }
-.workspace { grid-template-columns: minmax(260px, 285px) minmax(0, 1fr); gap: 18px; }
-.trip-list { padding: 18px; }
+.workspace { grid-template-columns: minmax(0, 285px) minmax(0, 1fr); gap: 18px; }
+.trip-list { min-width: 0; padding: 18px; }
+.trip-list > input { min-width: 0; }
+.trip-filters__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.trip-filters__grid label,
+.trip-filters__grid input,
+.trip-filters__grid select { min-width: 0; }
 .trip-list__item { padding: 15px 18px; }
 .trip-list__item strong { font-size: 14px; }
 .trip-list__item small { font-size: 12px; }
