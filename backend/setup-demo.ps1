@@ -32,7 +32,11 @@ try {
         }
         @(
             "demo.db.password=$(New-Secret)"
+            'demo.coordinator.email=coordinator@demo.tripshield.test'
             "demo.coordinator.password=$(New-Secret)"
+            'demo.traveler.maya.email=maya@demo.tripshield.test'
+            'demo.traveler.arjun.email=arjun@demo.tripshield.test'
+            'demo.traveler.nisha.email=nisha@demo.tripshield.test'
             "demo.traveler.password=$(New-Secret)"
         ) | Set-Content -LiteralPath $secretsPath -Encoding utf8
     }

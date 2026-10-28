@@ -1,4 +1,4 @@
-/* TripShield visual system. Shared tokens override the original page styles. */
+﻿/* TripShield visual system. Shared tokens override the original page styles. */
 :root {
   --ink: #172e39;
   --muted: #526773;
@@ -19,10 +19,6 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .58; }
 :where(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #19a8a6; outline-offset: 3px; }
 .eyebrow { color: #327779; font-size: 11px; letter-spacing: .11em; }
-.demo-login-hint { display: grid; gap: 4px; margin: -10px 0 22px; padding: 12px 14px; border: 1px solid #b9dcd4; border-radius: 9px; background: #f0f8f5; font-size: 12px; }
-.demo-login-hint strong { color: var(--teal-deep); }
-.demo-login-hint span { font-weight: 700; overflow-wrap: anywhere; }
-.demo-login-hint small { color: var(--muted); line-height: 1.4; }
 .button { border-radius: 9px; min-height: 40px; font-size: 13px; }
 .button--primary { box-shadow: 0 3px 8px #086d701e; }
 .surface, .overview-metric, .wizard-panel, .flight-picker { border-radius: var(--radius); box-shadow: var(--shadow); }
