@@ -1,5 +1,46 @@
 # TripShield repository audit
 
+## Web technology and session security verification — 2026-10-29
+
+This section describes current behavior and supersedes older bearer-only statements below. The original design already used BCrypt passwords, random server-side sessions stored as SHA-256 hashes, 12-hour expiry, logout invalidation, manual role/ownership checks, Jakarta validation, and Problem Details errors. The React browser previously stored the raw bearer token in `sessionStorage`; it had no authentication cookie or CSRF protection. The current browser flow uses an HttpOnly, SameSite=Lax session cookie and a session-bound CSRF cookie/header. Legacy bearer API clients remain supported through the same session table. No database migration or new dependency was needed.
+
+| Concept | Current state | Source and verification |
+| --- | --- | --- |
+| Authentication, BCrypt, 12-hour server session | Implemented | `AuthController`, `Access`, `AppSession`; backend and browser tests |
+| HttpOnly browser cookie, HTTPS Secure flag, SameSite Lax | Implemented | `AuthController`; HTTP/HTTPS integration assertions and Playwright cookie inspection |
+| Cookie persistence, login rotation, logout/expiry | Implemented | `useSession`, `Access`; integration tests and browser refresh/rotation/logout test |
+| CSRF on cookie-authenticated writes | Implemented | `Access`, `api.ts`; missing-token 403 integration/browser tests |
+| Role and owner authorization, 401/403 | Implemented for tested routes | `Access`, controllers; direct API integration and browser role checks |
+| Protected empty trip list | Fixed | `TripController.list` now authenticates before filtering an empty result; regression test |
+| CORS and XSS posture | Partially implemented | Same-origin Vite proxy, no credentialed CORS; React escaping and HttpOnly cookie; no deployment CSP |
+| Session renewal, rate limiting, account disable | Missing | Fixed 12-hour session only; no throttle, disable, or revoke-all workflow |
+
+The browser receives no raw session token in login JSON and stores none in Web Storage. The session cookie is host-only, Path `/api`, HttpOnly, SameSite Lax, with `Secure` when Spring sees HTTPS. The readable CSRF cookie is Path `/`; its header value must match the cookie and a value derived from the stored session hash. Bearer requests do not require CSRF because the browser does not attach bearer credentials automatically. Login and registration use an explicit custom browser header to request cookies; cross-origin credentialed CORS is not enabled. See `WEB_TECH_SYSTEM_DESIGN.md` and `WEB_TECH_DEMO_GUIDE.md` for diagrams and demonstration steps.
+
+**Final checks:** Backend `mvn.cmd test -q`: 49 tests, 0 failures. Frontend tests: 12 passed; lint and production build passed. Playwright: the 2 core journey tests and new security test passed in both Demo and isolated Normal Mode (3/3 each). The seeded presentation walkthrough passed 1/1 after the isolated demo dataset was temporarily reset to current relative dates. Its original four trips and accounts were restored from a verified backup afterward, as were the pre-test `tripshield_test` records (3 users, 2 trips, 3 items). No development database write occurred. The test initially exposed an unauthenticated empty-list 200 response; `TripController.list` now checks authentication before reading rows, and missing single-trip lookups return 401 before 404.
+
+The development `tripshield` database was not modified. Backend tests used a backed-up isolated `tripshield_test` schema; Demo and isolated Normal Mode browser runs used separate backends and databases. The seeded demo data must be reset on the presentation day to refresh relative dates; merely rerunning `seed-demo.mjs` preserves existing older scenarios. Real Duffel, SMTP, CSP deployment, and production TLS proxy configuration remain outside this verification.
+
+## Demo vs normal parity verification — 2026-10-29
+
+**Verdict:** One application implementation serves both profiles. Equivalent offline coordinator/traveler browser workflows passed in both modes. Core functionality matched in the tested paths. Live Duffel and SMTP delivery were not verified. The real development database was inspected read-only and was not used for startup or browser writes.
+
+| Feature | Demo profile | Normal/local profile | Evidence |
+| --- | --- | --- | --- |
+| Frontend, dependencies, controllers, entities, validation, roles, and API contracts | Shared source and build | Same source and build | `pom.xml`, `package.json`, profile/config inspection; same Playwright suite against each backend |
+| Coordinator/traveler login and permissions | Demo accounts in `tripshield_demo` | Isolated local-profile accounts in `tripshield_parity` | Browser registration, login, trip ownership, forbidden traveler disruption request |
+| Trip creation, flight/hotel/transport planning, timeline, and map | Working | Working | Both Playwright runs saved a complete itinerary and checked responsive views |
+| Disruptions, impact, alternatives, application, notifications, and check-in | Working | Working | Both Playwright runs covered hotel, transport, weather, cancellation, recovery, traveler notification/help |
+| Flight source | Forced, explicitly labeled DEMO schedules | Duffel when configured; explicitly labeled DEMO fallback when absent/unavailable | `application-demo.properties`, `FlightController`; both browser runs used offline schedules; live Duffel unverified |
+| SMTP | Outbox poller disabled; in-app notifications persist | Poller enabled by default; missing sender/recipient skips mail without blocking check-in | `EmailAlerts`, `OutboxPoller`; browser help workflow passed; mocked SMTP test passed; real delivery unverified |
+| Demo-only identity endpoint and seed/reset scripts | Present and guarded to `tripshield_demo` | Absent | Intentional isolation and labeling |
+
+**Schema:** Read-only `information_schema` comparison found identical definitions for shared application tables and columns. `tripshield` has 12 tables, 133 columns, 27 indexes, and 2 foreign keys; `tripshield_demo` has 11 tables, 125 columns, 24 indexes, and 1 foreign key. The entire difference is the extra empty `recovery_proposal` table, its 8 columns, 3 indexes, and foreign key, plus a successful V3 Flyway history row in the development schema. Current source has only V1/V2; demo has V1/V2. A schema-only isolated clone of development (`tripshield_parity`) started successfully under the local profile with a Flyway future-version warning. **No development migration or cleanup was applied.** Removing the unused table and V3 history would change the development schema and requires a reviewed backup and explicit approval. No migration is needed for the shared V1/V2 features.
+
+**Verification:** Backend `mvn.cmd test -q`: 47 passed. Frontend `npm.cmd test`: 12 passed; lint and production build passed. Playwright `e2e/demo.spec.ts`: 2/2 passed against Demo Mode and 2/2 passed against isolated Normal Mode, using the same frontend source on different Vite/backend ports. Browser coverage included 390, 768, 1366, and 1920px screenshots and overflow assertions. A temporary normal-profile credential override initially caused login failure; correcting the isolated runner's environment resolved it without a product code change. The test database was backed up and restored to its original 3 users, 2 trips, 3 items, and 2 migration rows. One new demo test traveler/trip and their related rows were removed by exact ID after browser verification; the original four demo trips remained. Normal parity records remain only in `tripshield_parity`.
+
+**Limits:** The normal browser run deliberately used no Duffel or SMTP credentials so equivalent offline workflows could be compared. An authenticated API spot check in both modes returned five labeled DEMO schedules for PNQ–DEL and zero for unsupported PNQ–GOI. The UI's loading/error/retry path was exercised with an HTTP 503 browser fixture. Existing backend tests cover mocked Duffel offers, expired offers, weather recovery, duplicate application, and mocked SMTP success/failure. Actual live provider availability and mail delivery remain unverified. Normal startup against the real `tripshield` schema was avoided because Flyway can write pending migrations; the equivalent isolated clone was used instead. No code parity defect was found, so production implementation was not changed.
+
 ## Final presentation preparation — 2026-10-26
 
 The final college demo now uses a dedicated `tripshield_demo` MySQL schema with its own restricted account and ignored generated secrets. The `demo` Spring profile refuses any other database URL, user, or mixed active profile. `setup-demo.ps1`, `run-demo.ps1`, `seed-demo.mjs`, and `reset-demo.ps1` provide the repeatable setup. Reset checks the demo API identity and exact MySQL schema/account, deletes only demo rows, and reseeds; it retains Flyway migrations. The development `tripshield` database was not connected to or modified. The pre-existing `tripshield_test` records were backed up before backend tests and restored afterward; their counts returned to 5 users, 4 trips, and 17 items.

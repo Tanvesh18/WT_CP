@@ -56,6 +56,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import jakarta.servlet.http.Cookie;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -110,6 +111,56 @@ class TripShieldIntegrationTest {
         String loginToken = body(loggedIn).path("token").asText();
         mvc.perform(post("/api/auth/logout").header("Authorization", bearer(loginToken))).andExpect(status().isOk());
         mvc.perform(get("/api/auth/me").header("Authorization", bearer(loginToken))).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void browserCookieSessionHasCsrfRotationAndLogoutProtection() throws Exception {
+        String email = email();
+        MvcResult registered = mvc.perform(post("/api/auth/register").header("X-TripShield-Browser", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("name", "Cookie Traveler", "email", email, "password", "correct-horse-42"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.token").value("")).andReturn();
+        String sessionHeader = registered.getResponse().getHeaders("Set-Cookie").stream().filter(value -> value.startsWith("TRIPSHIELD_SESSION=")).findFirst().orElseThrow();
+        String csrfHeader = registered.getResponse().getHeaders("Set-Cookie").stream().filter(value -> value.startsWith("TRIPSHIELD_CSRF=")).findFirst().orElseThrow();
+        assertTrue(sessionHeader.contains("HttpOnly")); assertTrue(sessionHeader.contains("SameSite=Lax"));
+        assertTrue(sessionHeader.contains("Path=/api")); assertTrue(sessionHeader.contains("Max-Age=43200"));
+        assertTrue(!sessionHeader.contains("Secure"));
+        assertTrue(!csrfHeader.contains("HttpOnly")); assertTrue(csrfHeader.contains("SameSite=Lax"));
+        Cookie sessionCookie = new Cookie("TRIPSHIELD_SESSION", sessionHeader.split(";", 2)[0].split("=", 2)[1]);
+        Cookie csrfCookie = new Cookie("TRIPSHIELD_CSRF", csrfHeader.split(";", 2)[0].split("=", 2)[1]);
+        mvc.perform(get("/api/auth/me").cookie(sessionCookie, csrfCookie)).andExpect(status().isOk()).andExpect(jsonPath("$.email").value(email));
+        mvc.perform(get("/api/trips")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/trips/999999")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/trips/1/cancel").cookie(sessionCookie, csrfCookie)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/trips/1/cancel").cookie(sessionCookie, csrfCookie).header("X-TripShield-CSRF", "wrong"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/trips/1/cancel").cookie(sessionCookie, csrfCookie).header("X-TripShield-CSRF", csrfCookie.getValue())).andExpect(status().isForbidden());
+        mvc.perform(post("/api/auth/logout").cookie(sessionCookie, csrfCookie)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/auth/logout").cookie(sessionCookie, csrfCookie).header("X-TripShield-CSRF", csrfCookie.getValue())).andExpect(status().isOk());
+        mvc.perform(get("/api/auth/me").cookie(sessionCookie, csrfCookie)).andExpect(status().isUnauthorized());
+        assertTrue(sessions.findAll().isEmpty());
+    }
+
+    @Test
+    void browserLoginRotatesSessionAndSecureRequestSetsSecureCookie() throws Exception {
+        String email = email();
+        String firstToken = register(email);
+        MvcResult login = mvc.perform(post("/api/auth/login").secure(true).header("X-TripShield-Browser", "1")
+                        .header("Authorization", bearer(firstToken)).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("email", email, "password", "correct-horse-42"))))
+                .andExpect(status().isOk()).andReturn();
+        String sessionHeader = login.getResponse().getHeaders("Set-Cookie").stream().filter(value -> value.startsWith("TRIPSHIELD_SESSION=")).findFirst().orElseThrow();
+        assertTrue(sessionHeader.contains("Secure"));
+        assertEquals(1, sessions.count());
+        mvc.perform(get("/api/auth/me").header("Authorization", bearer(firstToken))).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("email", email, "password", "wrong")))).andExpect(status().isUnauthorized());
+        Cookie newCookie = new Cookie("TRIPSHIELD_SESSION", sessionHeader.split(";", 2)[0].split("=", 2)[1]);
+        AppSession expiring = sessions.findAll().getFirst();
+        expiring.expiresAt = Instant.now().minusSeconds(1);
+        sessions.saveAndFlush(expiring);
+        mvc.perform(get("/api/auth/me").cookie(newCookie)).andExpect(status().isUnauthorized());
+        assertTrue(sessions.findAll().isEmpty());
     }
 
     @Test

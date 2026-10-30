@@ -2,7 +2,15 @@
 
 TripShield is a college project for corporate travel planning and disruption response. Coordinators plan itineraries and review traveler requests. Travelers request trips, see assigned itineraries, check in, and receive in-app notifications. Flight results come from Duffel when available, or from clearly labeled offline demo schedules. Hotel and transport choices are planning estimates. Disruptions are simulated; saving an offer does not issue a ticket, reserve a room, or charge a payment.
 
+## Demo and normal mode parity
+
+Both modes run the same Spring Boot jar, React frontend, API controllers, entities, migrations, role rules, and trip/recovery workflows. The profile changes the database and external integrations, not the application implementation. Demo forces labeled simulated flight schedules and disables SMTP delivery. Normal mode uses Duffel when configured; without a token, or if Duffel search fails, it returns **labeled DEMO schedules** under the existing fallback contract. Simulated results are never live availability. The normal database does not receive demo seed records or demo accounts.
+
+For an isolated normal-profile verification, the same frontend was pointed at a local-profile backend connected to an empty schema-only clone of `tripshield`. The same two Playwright tests passed in both modes. The real development database was never used for application startup or browser writes. Its schema currently has one extra, unused `recovery_proposal` table and Flyway V3 history entry from an incomplete prior attempt; the repository contains migrations V1 and V2 only. All shared application tables and columns match the demo schema. Flyway starts against the cloned schema with a future-version warning. Do not remove or alter that development table/history without reviewing a backup and approving the operation. The table had zero rows at the read-only check on 2026-10-29.
+
 The interface uses a shared responsive visual system across both roles. The coordinator overview prioritizes trips that need action; the traveler workspace shows trip status and an expandable notification inbox. In recovery, the recommendation is computed from the returned options by fewest downstream itinerary conflicts, then arrival timing and price. Coordinators review the affected item and proposed replacement before confirming an itinerary change. The recommendation and comparison use application data; they are not live booking promises.
+
+Browser authentication uses a server-side session row and an HttpOnly, SameSite=Lax cookie. A separate CSRF cookie supplies the value for the `X-TripShield-CSRF` header on writes. The browser stores no session token in `sessionStorage` or `localStorage`. The previous bearer-token API remains available to non-browser clients. See [web technology system design](docs/WEB_TECH_SYSTEM_DESIGN.md) and the [professor demonstration guide](docs/WEB_TECH_DEMO_GUIDE.md).
 
 ## Stack and startup
 
@@ -96,7 +104,7 @@ Help requests create a durable email outbox entry in the same transaction as the
 
 ## API
 
-All endpoints except registration and login use `Authorization: Bearer <token>`. `POST /api/trips` requires a unique `Idempotency-Key` header. An identical retry returns the existing trip; reuse with different details returns 409.
+Browser requests use the HttpOnly `TRIPSHIELD_SESSION` cookie; state-changing browser requests also send `X-TripShield-CSRF` matching the session-bound CSRF cookie. Non-browser API clients can still use `Authorization: Bearer <token>`. `POST /api/trips` requires a unique `Idempotency-Key` header. An identical retry returns the existing trip; reuse with different details returns 409.
 
 | Method | Path | Purpose |
 | --- | --- | --- |

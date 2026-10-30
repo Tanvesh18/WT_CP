@@ -87,7 +87,7 @@ public class TripController {
     public record ImpactView(String message, ItemView affectedItem, List<SegmentImpact> impactedSegments, List<OptionView> alternatives, String recoverySearchMessage) {}
 
     @GetMapping
-    public List<TripView> list() { return trips.findAll().stream().filter(access::canView).map(this::view).toList(); }
+    public List<TripView> list() { access.current(); return trips.findAll().stream().filter(access::canView).map(this::view).toList(); }
 
     @GetMapping("/{id}")
     public TripView get(@PathVariable Long id) { return view(find(id)); }
@@ -526,8 +526,8 @@ public class TripController {
         };
     }
 
-    private Trip findForUpdate(Long id) { Trip trip = trips.findByIdForUpdate(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
-    private Trip find(Long id) { Trip trip = trips.findById(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
+    private Trip findForUpdate(Long id) { access.current(); Trip trip = trips.findByIdForUpdate(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
+    private Trip find(Long id) { access.current(); Trip trip = trips.findById(id).orElseThrow(() -> notFound("Trip not found")); access.view(trip); return trip; }
     private TripItem item(Trip trip, Long id) {
         return trip.items.stream().filter(value -> value.id.equals(id)).findFirst()
                 .orElseThrow(() -> notFound("Itinerary item not found"));

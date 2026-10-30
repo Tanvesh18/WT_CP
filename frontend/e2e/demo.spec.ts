@@ -116,10 +116,10 @@ test('offline coordinator and traveler journeys cover every disruption type', as
   await expect(traveler.getByRole('button', { name: /Simulate/ })).toHaveCount(0)
   await expect(traveler.getByRole('button', { name: 'Use in itinerary' })).toHaveCount(0)
   const forbidden = await traveler.evaluate(async () => {
-    const token = sessionStorage.getItem('tripshield-token')
+    const csrf = document.cookie.split('; ').find(value => value.startsWith('TRIPSHIELD_CSRF='))?.split('=')[1]
     const tripId = document.querySelector('.trip-detail__head .eyebrow')?.textContent?.match(/\d+/)?.[0]
     return fetch(`/api/trips/${tripId}/disruptions`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'X-TripShield-CSRF': csrf || '', 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'SEVERE_WEATHER', itemId: 1 }),
     }).then(response => response.status)
   })

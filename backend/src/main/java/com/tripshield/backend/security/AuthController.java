@@ -9,6 +9,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.time.Duration;
 import java.util.Locale;
 @RestController @RequestMapping("/api/auth")
 public class AuthController {
@@ -39,6 +46,22 @@ public class AuthController {
   return session(user);
  }
  @GetMapping("/me") public Session me(){AppUser u=access.current();return new Session("",u.name,u.email,u.role);}
- @PostMapping("/logout") public void logout(){access.logout();}
- private Session session(AppUser user){return new Session(access.issue(user),user.name,user.email,user.role);}
+ @PostMapping("/logout") public void logout(){access.logout(); var web=web(); if(web!=null){cookie(web.getRequest(),web.getResponse(),Access.SESSION_COOKIE,"",true,true);cookie(web.getRequest(),web.getResponse(),Access.CSRF_COOKIE,"",false,true);}}
+ private Session session(AppUser user){
+  access.invalidateExisting();
+  String token=access.issue(user);
+  var web=web();
+  if(web!=null && "1".equals(web.getRequest().getHeader("X-TripShield-Browser"))){
+   cookie(web.getRequest(),web.getResponse(),Access.SESSION_COOKIE,token,true,false);
+   cookie(web.getRequest(),web.getResponse(),Access.CSRF_COOKIE,access.csrfToken(token),false,false);
+   return new Session("",user.name,user.email,user.role);
+  }
+  return new Session(token,user.name,user.email,user.role);
+ }
+ private ServletRequestAttributes web(){var attributes=RequestContextHolder.getRequestAttributes();return attributes instanceof ServletRequestAttributes servlet?servlet:null;}
+ private void cookie(HttpServletRequest request,HttpServletResponse response,String name,String value,boolean httpOnly,boolean clear){
+  ResponseCookie valueCookie=ResponseCookie.from(name,value).httpOnly(httpOnly).secure(request.isSecure()).sameSite("Lax")
+    .path(httpOnly?"/api":"/").maxAge(clear?Duration.ZERO:Duration.ofHours(12)).build();
+  response.addHeader(HttpHeaders.SET_COOKIE,valueCookie.toString());
+ }
 }

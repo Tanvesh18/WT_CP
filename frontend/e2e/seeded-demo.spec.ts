@@ -30,8 +30,7 @@ async function selectTrip(page: Page, route: string) {
 async function currentTrip(page: Page) {
   const id = Number((await page.locator('.trip-detail__head .eyebrow').textContent())?.match(/\d+/)?.[0])
   return page.evaluate(async tripId => {
-    const token = sessionStorage.getItem('tripshield-token')
-    const response = await fetch(`/api/trips/${tripId}`, { headers: { Authorization: `Bearer ${token}` } })
+    const response = await fetch(`/api/trips/${tripId}`)
     return response.json()
   }, id) as Promise<{ id: number; status: string; items: Array<{ id: number; kind: string; status: string; flightSource?: string; title: string }> }>
 }
@@ -80,8 +79,7 @@ async function recover(page: Page, info: TestInfo, label: string, expectedKind: 
   const affected = trip.items.find(item => item.kind === expectedKind && item.status === 'AFFECTED')
   expect(affected).toBeTruthy()
   const optionId = await page.evaluate(async ({ tripId, itemId }) => {
-    const token = sessionStorage.getItem('tripshield-token')
-    const response = await fetch(`/api/trips/${tripId}/items/${itemId}/alternatives`, { headers: { Authorization: `Bearer ${token}` } })
+    const response = await fetch(`/api/trips/${tripId}/items/${itemId}/alternatives`)
     const data = await response.json()
     return data.alternatives[0]?.id as number
   }, { tripId: trip.id, itemId: affected!.id })
@@ -113,8 +111,8 @@ test('seeded coordinator and traveler presentation walkthrough', async ({ browse
   await coordinator.getByRole('button', { name: /Review alternatives/ }).first().click()
   const cancellation = await recover(coordinator, info, 'seeded-flight-cancellation', 'FLIGHT')
   const duplicate = await coordinator.evaluate(async ({ tripId, itemId, optionId }) => {
-    const token = sessionStorage.getItem('tripshield-token')
-    const response = await fetch(`/api/trips/${tripId}/items/${itemId}/alternatives/${optionId}/apply`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    const csrf = document.cookie.split('; ').find(value => value.startsWith('TRIPSHIELD_CSRF='))?.split('=')[1]
+    const response = await fetch(`/api/trips/${tripId}/items/${itemId}/alternatives/${optionId}/apply`, { method: 'POST', headers: { 'X-TripShield-CSRF': csrf || '' } })
     return response.status
   }, cancellation)
   expect(duplicate).toBe(400)
@@ -133,8 +131,8 @@ test('seeded coordinator and traveler presentation walkthrough', async ({ browse
   await coordinator.getByRole('button', { name: 'Simulate cancellation' }).first().click()
   const newCancellation = await recover(coordinator, info, 'new-flight-cancellation', 'FLIGHT')
   const duplicateApply = await coordinator.evaluate(async ({ tripId, itemId, optionId }) => {
-    const token = sessionStorage.getItem('tripshield-token')
-    const response = await fetch(`/api/trips/${tripId}/items/${itemId}/alternatives/${optionId}/apply`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    const csrf = document.cookie.split('; ').find(value => value.startsWith('TRIPSHIELD_CSRF='))?.split('=')[1]
+    const response = await fetch(`/api/trips/${tripId}/items/${itemId}/alternatives/${optionId}/apply`, { method: 'POST', headers: { 'X-TripShield-CSRF': csrf || '' } })
     return response.status
   }, newCancellation)
   expect(duplicateApply).toBe(400)
@@ -150,7 +148,7 @@ test('seeded coordinator and traveler presentation walkthrough', async ({ browse
   const traveler = await browser.newPage({ viewport: { width: 1366, height: 900 } })
   await signIn(traveler, 'maya@demo.tripshield.test', secrets['demo.traveler.password'])
   await expect(traveler.getByText('Traveler workspace')).toBeVisible()
-  expect(await traveler.locator('.overview-row').count()).toBeGreaterThanOrEqual(2)
+  await expect.poll(() => traveler.locator('.overview-row').count()).toBeGreaterThanOrEqual(2)
   await screenshots(traveler, info, 'seeded-traveler-dashboard')
   await selectTrip(traveler, 'Mumbai')
   await expect(traveler.getByText('Offline demo schedule').first()).toBeVisible()
@@ -160,8 +158,7 @@ test('seeded coordinator and traveler presentation walkthrough', async ({ browse
   await expect(traveler.getByText(/A recovery option was added to your itinerary/).first()).toBeVisible()
   await screenshots(traveler, info, 'seeded-traveler-notifications')
   const forbidden = await traveler.evaluate(async tripId => {
-    const token = sessionStorage.getItem('tripshield-token')
-    return (await fetch(`/api/trips/${tripId}/items/1/alternatives`, { headers: { Authorization: `Bearer ${token}` } })).status
+    return (await fetch(`/api/trips/${tripId}/items/1/alternatives`)).status
   }, cancellation.tripId)
   expect(forbidden).toBe(403)
   await traveler.getByRole('button', { name: 'Hide updates' }).click()
