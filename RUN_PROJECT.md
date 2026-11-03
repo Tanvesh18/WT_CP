@@ -4,6 +4,20 @@ Run the backend and frontend in **separate PowerShell terminals**. Both modes us
 
 ## Demo Mode with presentation data
 
+In the **backend** terminal, run:
+
+```powershell
+npm run demo
+```
+
+In the **frontend** terminal, run the same command:
+
+```powershell
+npm run demo
+```
+
+Open **http://127.0.0.1:15174** when both are ready. The backend command sets up the demo database if needed, builds the backend, and seeds the scenarios. The frontend command installs dependencies if needed. MySQL must be running; first-time setup also needs the MySQL administrator credentials in `backend/config/local.properties`. Stop each terminal with **Ctrl+C**. The longer individual commands below remain available.
+
 **First-time setup only**, from the project root:
 
 ```powershell

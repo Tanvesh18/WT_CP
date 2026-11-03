@@ -1,0 +1,7 @@
+{
+  "name": "tripshield-backend-launcher",
+  "private": true,
+  "scripts": {
+    "demo": "demo.cmd"
+  }
+}
