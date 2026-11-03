@@ -102,6 +102,46 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .segment--affected .segment__body { border-left-color: #c55d47; }
 .segment__actions .button { font-size: 12px; min-height: 36px; }
 .detail-section { padding: 24px 0; }
+.weather-status { display: flex; align-items: center; gap: 8px; width: fit-content; margin: 18px 0; padding: 9px 12px; border: 1px solid #b9ddcf; border-radius: 999px; background: #eff8f2; color: #286d50; font-size: 12px; }
+.weather-status span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #4d9b77; color: #fff; font-weight: 800; }
+.weather-hero { position: relative; display: flex; align-items: center; justify-content: space-between; min-height: 190px; overflow: hidden; margin: 18px 0; padding: 26px 30px; border-radius: 18px; color: #fff; background: linear-gradient(120deg, #123f5b, #247f8c); box-shadow: 0 12px 28px #164c5b2b; }
+.weather-hero--sunny { background: linear-gradient(120deg, #1d5870, #e1a34b); }
+.weather-hero--cloudy, .weather-hero--foggy { background: linear-gradient(120deg, #27445b, #658b9a); }
+.weather-hero--rainy { background: linear-gradient(120deg, #183d5a, #3c7d9a); }
+.weather-hero--snowy { background: linear-gradient(120deg, #557d98, #9fbec8); }
+.weather-hero--stormy { background: linear-gradient(120deg, #202b4b, #52658a); }
+.weather-hero__glow { position: absolute; top: -90px; right: 12%; width: 270px; height: 270px; border-radius: 50%; background: #ffffff18; filter: blur(2px); }
+.weather-hero__copy, .weather-hero__visual { position: relative; z-index: 1; }
+.weather-hero__label { display: block; color: #d3eff0; font-size: 10px; font-weight: 800; letter-spacing: .15em; }
+.weather-hero__copy>strong { display: block; margin-top: 12px; font: 800 clamp(25px, 3vw, 38px) Manrope; letter-spacing: -.04em; }
+.weather-hero__copy p { margin: 5px 0 20px; color: #e2f1f1; font-size: 13px; }
+.weather-hero__stats { display: flex; flex-wrap: wrap; gap: 18px; color: #c9e2e4; font-size: 11px; }
+.weather-hero__stats b { margin-right: 4px; color: #fff; font-size: 17px; }
+.weather-hero__visual { display: grid; justify-items: center; gap: 12px; margin-right: 5%; }
+.weather-hero__visual span { font-size: 76px; line-height: 1; filter: drop-shadow(0 8px 8px #082a3533); }
+.weather-hero__visual small { color: #d9eeee; font-size: 11px; }
+.weather-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin: 18px 0 20px; }
+.weather-card { min-width: 0; overflow: hidden; border: 1px solid #dce8e7; border-radius: 12px; background: linear-gradient(145deg, #f8fcfb, #fff); box-shadow: 0 5px 16px #16343c0b; }
+.weather-card__top { display: flex; align-items: start; justify-content: space-between; gap: 8px; padding: 14px 14px 8px; }
+.weather-card__top strong, .weather-card__top small { display: block; }
+.weather-card__top strong { font-size: 13px; }
+.weather-card__top small { margin-top: 4px; color: var(--muted); font-size: 11px; }
+.weather-card__icon { font-size: 30px; line-height: 1; }
+.weather-card__condition { min-height: 30px; margin: 0; padding: 0 14px; color: var(--muted); font-size: 11px; }
+.weather-card__temperature { display: flex; align-items: baseline; gap: 7px; padding: 4px 14px 12px; }
+.weather-card__temperature strong { font: 800 29px Manrope; letter-spacing: -.05em; }
+.weather-card__temperature span { color: var(--muted); font-size: 11px; }
+.weather-card__details { display: flex; justify-content: space-between; gap: 8px; padding: 10px 14px; border-top: 1px solid #e8efee; color: #4d6870; font-size: 10px; }
+.weather-card--rainy, .weather-card--stormy { border-top: 3px solid #5b9eb1; }
+.weather-card--sunny { border-top: 3px solid #e5ae50; }
+.weather-card--snowy { border-top: 3px solid #9ab5c5; }
+.weather-card--foggy { border-top: 3px solid #9caeae; }
+@media (max-width: 600px) {
+  .weather-hero { align-items: start; padding: 22px; }
+  .weather-hero__visual { position: absolute; top: 24px; right: 8px; margin: 0; }
+  .weather-hero__visual span { font-size: 54px; }
+  .weather-hero__copy { max-width: 75%; }
+}
 .history strong, .history p { font-size: 13px; }
 .history time { font-size: 12px; }
 .wizard-panel { padding: clamp(20px, 3vw, 38px); }
