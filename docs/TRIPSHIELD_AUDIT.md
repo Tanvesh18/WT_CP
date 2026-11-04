@@ -1,3 +1,60 @@
+# Complete end-to-end audit — 2026-11-04
+
+## Verdict
+
+**Overall: PASS for implemented offline/demo functionality.** No reproducible product defects were found during the isolated backend, frontend, API, database, and browser audit. No production-code fixes or new regression tests were required. Existing regression coverage was rerun successfully.
+
+The development `tripshield` database was not started, queried, or modified. Browser and API writes used only `tripshield_test` and `tripshield_demo`. The demo schema was reset after testing and restored to its four relative-date scenarios.
+
+## Feature-by-feature status
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Coordinator authentication | PASS | Valid login reached Coordinator workspace; invalid password returned the expected alert; logout removed access. |
+| Traveler registration and authentication | PASS | Browser registration, login, refresh, and logout completed in isolated test and demo flows. |
+| Authorization and role restrictions | PASS | Traveler could not access coordinator traveler directory, disruption, alternative, or simulation actions; protected APIs returned 401/403 as expected. |
+| Server-side sessions | PASS | Session persisted across refresh, rotated on second login, and the old session was rejected. |
+| Cookies and token storage | PASS | Session cookie was HttpOnly, SameSite=Lax, Path `/api`; no bearer token was stored in Web Storage. |
+| CSRF protection | PASS | Cookie-authenticated write without `X-TripShield-CSRF` returned 403; valid writes succeeded. |
+| Trip creation and validation | PASS | Coordinator created trips with registered travelers and guests; invalid identical airports were rejected; date and itinerary validation passed. |
+| Flight search | PASS | Offline demo schedules loaded; loading, HTTP 503 error, and retry-to-offline fallback were exercised. |
+| Itinerary management | PASS | Flight, hotel, transport, return flight, timeline, route map, budget, and trip persistence were verified. |
+| Disruption simulation | PASS | Cancellation, severe weather, hotel, and transport disruptions were exercised across seeded and newly-created trips. |
+| Recovery recommendations | PASS | Alternatives loaded, exactly one recommendation was shown, confirmation applied the replacement, and duplicate application was rejected. |
+| Connected itinerary recovery | PASS | Weather recovery exposed downstream risk and allowed a valid replacement flow. |
+| Notifications and help requests | PASS | Recovery notifications were visible to the traveler; traveler help request was recorded and visible to the coordinator. |
+| Check-in and trip status | PASS | Existing backend integration coverage passed; seeded coordinator/traveler flows preserved status and ownership behavior. |
+| Database persistence | PASS | API read-back matched writes; direct isolated MySQL verification confirmed replaced item status. |
+| Responsive layouts | PASS | Coordinator and traveler pages were exercised at 390, 768, 1366, and 1920px with no horizontal overflow. |
+| Invalid and edge inputs | PASS | Invalid credentials, missing CSRF, duplicate recovery, identical airports, failed flight search, unsupported access, and expired/invalid offer logic were covered. |
+| External Duffel flight availability | NOT TESTED | Audit intentionally used labeled offline schedules; live provider behavior requires a separate non-production Duffel credential. |
+| SMTP delivery | NOT TESTED | In-app notifications were verified; real external mail delivery was not attempted. |
+| Production TLS/CSP deployment | NOT TESTED | Local HTTP audit only; deployment proxy and production browser policies are outside this run. |
+
+## Test evidence
+
+| Check | Result |
+| --- | --- |
+| Backend `backend\mvnw.cmd test` | PASS — 49 tests, 0 failures, 0 errors, 0 skipped |
+| Frontend `npm.cmd test` | PASS — 12 tests |
+| Frontend `npm.cmd run lint` | PASS |
+| Frontend `npm.cmd run build` | PASS |
+| Playwright normal/test profile | PASS — 4 passed, 1 intentionally skipped (`seeded-demo.spec.ts`) |
+| Playwright dedicated demo walkthrough | PASS — 1 passed |
+| Demo identity/readiness | PASS — `DEMO`, `tripshield_demo`, HTTP 200 |
+| Docker capability | UNAVAILABLE — Docker CLI/daemon not installed; MySQL was already available locally and the repository's isolated scripts were used |
+| Browser capability | PASS — Chromium installed and executed headlessly |
+
+## Security review
+
+The independent security review found no high-confidence vulnerabilities in the reviewed application. Authentication, authorization, session rotation, cookie flags, CSRF enforcement, and storage behavior were also verified through browser and integration tests.
+
+## Cleanup
+
+`reset-demo.ps1 -ApiUrl http://127.0.0.1:18084` was run after the audit. It recreated scenarios A–D and verified the demo identity before seeding. No development database operation was performed.
+
+---
+
 # TripShield repository audit
 
 ## Web technology and session security verification — 2026-10-29
@@ -365,4 +422,3 @@ The Spring context tests use the fixed test profile with `ddl-auto=create-drop`.
 5. Complete browser acceptance testing for coordinator/traveler journeys, mobile layout, keyboard access, API outage states, offer expiry boundaries, DST/overnight schedules, and live sandbox contract behavior.
 
 This is a repository review plus isolated MySQL API integration tests, frontend unit tests, lint, and build. It is not a penetration test, production configuration review, legal/compliance assessment, or end-to-end browser acceptance run. Remaining source-level risks are hypotheses unless explicitly reproduced above. Phase 2 changed backend application source and test files; it did not change the development `tripshield` database or disclose credentials or tokens.
-

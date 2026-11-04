@@ -41,7 +41,7 @@ function persistedStatus(tripId: number, itemId: number) {
   return result.stdout.trim()
 }
 async function createTrip(page: Page, origin: string, originChoice: RegExp, destination: string, destinationChoice: RegExp, departure: string, end: string, person: string) {
-  await page.getByRole('button', { name: /New trip/ }).click()
+  await page.getByRole('button', { name: /Arrange travel/ }).click()
   await page.getByRole('button', { name: /Continue/ }).click()
   await expect(page.getByRole('alert')).toContainText('Choose two different airports')
   await page.getByRole('combobox', { name: 'Departure airport' }).fill(origin)
